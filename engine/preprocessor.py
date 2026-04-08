@@ -27,6 +27,34 @@ def compute_file_hash(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+# ── Work image helpers ─────────────────────────────────────────────────────────
+
+WORK_MAX = 900  # max pixels on longest side for working copy
+
+def _write_work_image(img_pil: Image.Image, work_path: Path, width: int, height: int):
+    scale = min(1.0, WORK_MAX / max(width, height))
+    if scale < 1.0:
+        work_w = max(1, int(width  * scale))
+        work_h = max(1, int(height * scale))
+        img_pil.resize((work_w, work_h), Image.LANCZOS).save(
+            work_path, format="JPEG", quality=92)
+    else:
+        img_pil.save(work_path, format="JPEG", quality=92)
+
+def _ensure_work_image(image_path: Path, cache_dir: Path, file_hash: str, meta: dict):
+    """Back-fill work_path into an existing meta dict (in-place)."""
+    work_path = cache_dir / f"{file_hash}_work.jpg"
+    if not work_path.exists():
+        try:
+            img = Image.open(image_path).convert("RGB")
+            w, h = img.size
+            _write_work_image(img, work_path, w, h)
+        except Exception as e:
+            print(f"[preprocessor] work image back-fill failed: {e}")
+            return
+    meta["work_path"] = str(work_path)
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def preprocess_image(
@@ -56,14 +84,25 @@ def preprocess_image(
 
     # Return cached result if complete
     if meta_path.exists():
-        return json.loads(meta_path.read_text(encoding="utf-8"))
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        # Back-fill work_path if missing from older cache entries
+        if not meta.get("work_path"):
+            _ensure_work_image(image_path, cache_dir, file_hash, meta)
+            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return meta
 
     # 2. Load ──────────────────────────────────────────────────────────────────
     progress(1, "loading image")
     img_pil = Image.open(image_path).convert("RGB")
+    width, height = img_pil.size
+
+    # Save a working-size copy (max 900px on longest side) for fast stamp generation
+    work_path = cache_dir / f"{file_hash}_work.jpg"
+    if not work_path.exists():
+        _write_work_image(img_pil, work_path, width, height)
+
     img_np = np.array(img_pil)
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-    width, height = img_pil.size
 
     # 3. Subject mask (rembg) ──────────────────────────────────────────────────
     progress(2, "generating subject mask")
@@ -118,6 +157,7 @@ def preprocess_image(
         "has_mask": has_mask,
         "subject_bbox": subject_bbox,
         "mask_path": str(mask_path) if has_mask else None,
+        "work_path": str(work_path),
         "edges_path": str(edges_path),
         "variance_path": str(variance_path),
     }

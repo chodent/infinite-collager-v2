@@ -21,7 +21,7 @@ PlacementDict keys:
 
 import math
 import random
-from typing import List
+from typing import List, Tuple
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -100,6 +100,35 @@ def _assign_cut_morph(entry: dict, role: str, spec: dict, rng: random.Random) ->
         entry["morph_type"] = _pick_morph(spec, rng)
     return entry
 
+def _detail_size(cw: int, ch: int, rng: random.Random) -> Tuple[int, int]:
+    """
+    Detail stamps: visible minimum 10% of shorter dimension, max 22%.
+    Aspect ratio varies — can be rectangular, not just square.
+    """
+    min_dim  = min(cw, ch)
+    base     = rng.uniform(0.10, 0.22) * min_dim
+    aspect   = rng.uniform(0.5, 2.0)          # allow tall or wide fragments
+    pw       = max(60, int(base * math.sqrt(aspect)))
+    ph       = max(60, int(base / math.sqrt(aspect)))
+    return pw, ph
+
+def _make_clusters(n: int, cw: int, ch: int, rng: random.Random, n_clusters: int = 3) -> list:
+    """
+    Generate n (cx, cy) positions clustered around n_clusters seeded anchor points.
+    Returns list of (px, py) top-left positions with a placeholder size.
+    """
+    anchors = [(rng.randint(int(cw * 0.1), int(cw * 0.9)),
+                rng.randint(int(ch * 0.1), int(ch * 0.9)))
+               for _ in range(n_clusters)]
+    positions = []
+    for i in range(n):
+        ax, ay = anchors[i % n_clusters]
+        spread = int(min(cw, ch) * 0.18)
+        px = int(ax + rng.uniform(-spread, spread))
+        py = int(ay + rng.uniform(-spread, spread))
+        positions.append((px, py))
+    return positions
+
 def _shuffle_z(placements: list, rng: random.Random) -> list:
     """Assign z_orders: background=0, rest shuffled but with role bias."""
     role_base = {"background": 0, "strip": 1, "detail": 2, "supporting": 3, "dominant": 4}
@@ -113,8 +142,11 @@ def _shuffle_z(placements: list, rng: random.Random) -> list:
 # ── Scenic ─────────────────────────────────────────────────────────────────────
 
 def _scenic(role_list, spec, cw, ch, rng):
-    placements = []
-    bleed      = spec["allow_bleed"]
+    placements  = []
+    bleed       = spec["allow_bleed"]
+    detail_list = [e for e in role_list if e["role"] == "detail"]
+    cluster_pos = _make_clusters(len(detail_list), cw, ch, rng, n_clusters=3)
+    detail_idx  = 0
 
     for entry in role_list:
         role = entry["role"]
@@ -144,10 +176,11 @@ def _scenic(role_list, spec, cw, ch, rng):
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 0.5))
 
         elif role == "detail":
-            pw = int(rng.uniform(0.05, 0.18) * cw)
-            ph = int(rng.uniform(0.05, 0.18) * ch)
-            px = rng.randint(-pw // 4, cw)
-            py = rng.randint(-ph // 4, ch)
+            pw, ph = _detail_size(cw, ch, rng)
+            cx_d, cy_d = cluster_pos[detail_idx]
+            px = cx_d - pw // 2
+            py = cy_d - ph // 2
+            detail_idx += 1
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 1.0))
 
         elif role == "strip":
@@ -171,15 +204,22 @@ def _scenic(role_list, spec, cw, ch, rng):
 # ── Symmetric ──────────────────────────────────────────────────────────────────
 
 def _symmetric(role_list, spec, cw, ch, rng):
-    """Place stamps on left half, mirror to right. Dominant stamps placed on axis."""
-    placements = []
-    axis_x     = cw // 2
-    bleed      = spec["allow_bleed"]
+    """
+    Gravitational balance — stamps weighted toward the axis rather than hard pixel-mirror.
+    Dominant stamps anchor the center axis. Others are placed with bilateral pull:
+    their x-position is biased toward being equidistant from center, but not exact.
+    """
+    placements  = []
+    axis_x      = cw // 2
+    detail_list = [e for e in role_list if e["role"] == "detail"]
+    # Clusters on left half only — mirroring doubles them
+    cluster_pos = _make_clusters(len(detail_list), axis_x, ch, rng, n_clusters=2)
+    detail_idx  = 0
 
-    dominants   = [e for e in role_list if e["role"] == "dominant"]
-    others      = [e for e in role_list if e["role"] != "dominant"]
+    dominants = [e for e in role_list if e["role"] == "dominant"]
+    others    = [e for e in role_list if e["role"] != "dominant"]
 
-    # Dominant stamps go on the axis
+    # Dominant stamps anchor the center
     for entry in dominants:
         _assign_cut_morph(entry, "dominant", spec, rng)
         p = dict(entry)
@@ -191,7 +231,6 @@ def _symmetric(role_list, spec, cw, ch, rng):
                  rotation=_rot(spec, rng, 0.08), flip_h=False)
         placements.append(p)
 
-    # Other stamps: place on left half, then mirror
     for entry in others:
         role = entry["role"]
         _assign_cut_morph(entry, role, spec, rng)
@@ -203,27 +242,38 @@ def _symmetric(role_list, spec, cw, ch, rng):
             placements.append(p)
             continue
 
-        elif role in ("supporting", "detail"):
-            size_frac = rng.uniform(0.08, 0.35) if role == "detail" else rng.uniform(0.18, 0.42)
-            pw = int(size_frac * cw)
-            ph = int(size_frac * ch)
-            # Left half placement
-            px = rng.randint(0, max(1, axis_x - pw))
+        elif role == "detail":
+            pw, ph = _detail_size(cw, ch, rng)
+            cx_d, cy_d = cluster_pos[detail_idx % len(cluster_pos)]
+            px  = cx_d - pw // 2
+            py  = cy_d - ph // 2
+            rot = _rot(spec, rng, 1.0)
+            detail_idx += 1
+
+        elif role == "supporting":
+            pw = int(rng.uniform(0.18, 0.42) * cw)
+            ph = int(rng.uniform(0.18, 0.42) * ch)
+            # Bilateral pull: place left of axis with slight inward bias
+            px = rng.randint(0, max(1, axis_x - pw // 2))
             py = rng.randint(0, max(1, ch - ph))
             rot = _rot(spec, rng, 0.6)
+
         elif role == "strip":
             pw = int(rng.uniform(0.02, 0.07) * cw)
             ph = ch
             px = rng.randint(0, max(1, axis_x - pw))
             py = 0
             rot = 0.0
+        else:
+            pw, ph, px, py, rot = 60, 60, 0, 0, 0.0
 
         p.update(px=px, py=py, pw=pw, ph=ph, rotation=rot)
         placements.append(p)
 
-        # Mirror to right half
-        mirror = dict(p)
-        mirror["px"]     = cw - px - pw
+        # Mirror: small random offset from exact mirror for organic feel
+        jitter   = int(rng.uniform(-0.03, 0.03) * cw)
+        mirror   = dict(p)
+        mirror["px"]     = cw - px - pw + jitter
         mirror["flip_h"] = True
         mirror["z_order"] = p.get("z_order", 5)
         placements.append(mirror)
@@ -234,15 +284,15 @@ def _symmetric(role_list, spec, cw, ch, rng):
 # ── Radial ─────────────────────────────────────────────────────────────────────
 
 def _radial(role_list, spec, cw, ch, rng):
-    """Dominant at center, supporters fan outward, details at periphery."""
-    placements = []
-    cx, cy     = cw // 2, ch // 2
-    bleed      = spec["allow_bleed"]
+    """Dominant at center, supporters fan outward, details clustered at periphery."""
+    placements   = []
+    cx, cy       = cw // 2, ch // 2
+    detail_list  = [e for e in role_list if e["role"] == "detail"]
+    cluster_pos  = _make_clusters(len(detail_list), cw, ch, rng, n_clusters=3)
+    detail_idx   = 0
 
     n_supporting = sum(1 for e in role_list if e["role"] == "supporting")
-    n_detail     = sum(1 for e in role_list if e["role"] == "detail")
     sup_idx      = 0
-    det_idx      = 0
 
     for entry in role_list:
         role = entry["role"]
@@ -271,13 +321,11 @@ def _radial(role_list, spec, cw, ch, rng):
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 0.5))
 
         elif role == "detail":
-            angle = (det_idx / max(1, n_detail)) * 2 * math.pi + rng.uniform(-0.5, 0.5)
-            dist  = rng.uniform(0.40, 0.75) * min(cw, ch)
-            pw    = int(rng.uniform(0.05, 0.16) * cw)
-            ph    = int(rng.uniform(0.05, 0.16) * ch)
-            px    = int(cx + dist * math.cos(angle)) - pw // 2
-            py    = int(cy + dist * math.sin(angle)) - ph // 2
-            det_idx += 1
+            pw, ph     = _detail_size(cw, ch, rng)
+            cx_d, cy_d = cluster_pos[detail_idx]
+            px = cx_d - pw // 2
+            py = cy_d - ph // 2
+            detail_idx += 1
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 1.0))
 
         elif role == "strip":
@@ -334,14 +382,13 @@ def _framed(role_list, spec, cw, ch, rng):
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 0.4))
 
         elif role == "detail":
-            # Pack into border zone
-            pw = int(rng.uniform(0.05, 0.14) * cw)
-            ph = int(rng.uniform(0.05, 0.14) * ch)
+            # Pack into border zone with guaranteed visible size
+            pw, ph = _detail_size(cw, ch, rng)
             side = rng.randint(0, 3)
-            if side == 0:   px, py = rng.randint(0, cw - pw), rng.randint(0, border)
-            elif side == 1: px, py = rng.randint(0, cw - pw), rng.randint(ch - border, ch - ph)
-            elif side == 2: px, py = rng.randint(0, border),  rng.randint(0, ch - ph)
-            else:           px, py = rng.randint(cw - border, cw - pw), rng.randint(0, ch - ph)
+            if side == 0:   px, py = rng.randint(0, max(1, cw - pw)), rng.randint(0, max(1, border))
+            elif side == 1: px, py = rng.randint(0, max(1, cw - pw)), rng.randint(max(0, ch - border), max(0, ch - ph))
+            elif side == 2: px, py = rng.randint(0, max(1, border)),  rng.randint(0, max(1, ch - ph))
+            else:           px, py = rng.randint(max(0, cw - border), max(0, cw - pw)), rng.randint(0, max(1, ch - ph))
             px = max(0, min(px, cw - 1))
             py = max(0, min(py, ch - 1))
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 1.0))

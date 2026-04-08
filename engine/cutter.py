@@ -28,6 +28,7 @@ def cut_stamp(
     cut_type: str,
     params: Optional[dict] = None,
     seed: Optional[int] = None,
+    img_pil: Optional[Image.Image] = None,   # pass pre-loaded image to skip disk read
 ) -> Image.Image:
     """
     Cut a stamp from an image. Returns RGBA PIL Image.
@@ -35,14 +36,21 @@ def cut_stamp(
     cut_type: 'silhouette' | 'tear' | 'geometric' | 'raw'
     params:   dict of cut-specific parameters (see each function below)
     seed:     random seed for reproducibility
+    img_pil:  optional pre-loaded PIL image (avoids disk read)
     """
     if params is None:
         params = {}
     if seed is None:
         seed = random.randint(0, 999_999)
 
-    img_pil = Image.open(image_path).convert("RGBA")
-    img_np  = np.array(img_pil)
+    if img_pil is None:
+        # Prefer work_path (900px max) over original for speed
+        load_path = meta.get("work_path") or image_path
+        img_pil = Image.open(load_path).convert("RGBA")
+    else:
+        img_pil = img_pil.convert("RGBA")
+
+    img_np = np.array(img_pil)
 
     if   cut_type == "silhouette": return _silhouette_cut(img_pil, img_np, meta, params, seed)
     elif cut_type == "tear":       return _tear_cut      (img_pil, img_np, meta, params, seed)
@@ -229,23 +237,45 @@ def _geometric_cut(
         pts = np.array([[x, 0], [x+strip_w, 0], [x+strip_w, height], [x, height]], dtype=np.int32)
 
     elif shape == "triangle":
-        # Scalene triangle — 3 independently seeded points biased toward subject
-        bbox = meta.get("subject_bbox", {"x": width // 4, "y": height // 4,
-                                          "w": width // 2, "h": height // 2})
-        bx, by, bw, bh = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
-        # Each vertex is a blend of a subject-biased position and a random image position
-        # blend=0 → inside subject bbox, blend=1 → anywhere in image
-        def _vertex(blend: float) -> list:
-            sx = int(rng.integers(bx, bx + bw + 1))
-            sy = int(rng.integers(by, by + bh + 1))
-            rx_ = int(rng.integers(0, width))
-            ry_ = int(rng.integers(0, height))
-            return [int(sx * (1 - blend) + rx_ * blend),
-                    int(sy * (1 - blend) + ry_ * blend)]
-        v0 = _vertex(float(rng.uniform(0.0, 0.3)))   # near subject
-        v1 = _vertex(float(rng.uniform(0.4, 0.9)))   # pulled outward
-        v2 = _vertex(float(rng.uniform(0.4, 0.9)))   # pulled outward
-        pts = np.array([v0, v1, v2], dtype=np.int32)
+        # 70% chance: elongated spike/sliver (like a narrow strip but diagonal)
+        # 30% chance: scalene seeded triangle (original behaviour)
+        use_spike = float(rng.uniform(0, 1)) < 0.70
+
+        if use_spike:
+            # Elongated spike: one sharp tip, wide base — reads like a diagonal strip
+            # Choose a random angle for the spike direction
+            angle    = float(rng.uniform(0, math.pi * 2))
+            length   = int(rng.integers(int(min(width, height) * 0.45),
+                                        int(max(width, height) * 0.95)))
+            half_w   = int(rng.integers(int(min(width, height) * 0.02),
+                                        int(min(width, height) * 0.08)))
+            # Base center: somewhere in the image
+            bx_c = int(rng.integers(int(width * 0.2), int(width * 0.8)))
+            by_c = int(rng.integers(int(height * 0.2), int(height * 0.8)))
+            # Tip point
+            tip_x = int(bx_c + length * math.cos(angle))
+            tip_y = int(by_c + length * math.sin(angle))
+            # Two base corners, perpendicular to the spike direction
+            perp_x = -math.sin(angle) * half_w
+            perp_y =  math.cos(angle) * half_w
+            b1 = [int(bx_c + perp_x), int(by_c + perp_y)]
+            b2 = [int(bx_c - perp_x), int(by_c - perp_y)]
+            pts = np.array([[tip_x, tip_y], b1, b2], dtype=np.int32)
+        else:
+            bbox = meta.get("subject_bbox", {"x": width // 4, "y": height // 4,
+                                              "w": width // 2, "h": height // 2})
+            bx, by, bw, bh = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
+            def _vertex(blend: float) -> list:
+                sx  = int(rng.integers(bx, bx + bw + 1))
+                sy  = int(rng.integers(by, by + bh + 1))
+                rx_ = int(rng.integers(0, width))
+                ry_ = int(rng.integers(0, height))
+                return [int(sx * (1 - blend) + rx_ * blend),
+                        int(sy * (1 - blend) + ry_ * blend)]
+            v0 = _vertex(float(rng.uniform(0.0, 0.3)))
+            v1 = _vertex(float(rng.uniform(0.4, 0.9)))
+            v2 = _vertex(float(rng.uniform(0.4, 0.9)))
+            pts = np.array([v0, v1, v2], dtype=np.int32)
 
     elif shape == "wedge":
         # Pie-slice / fan — apex placed at or near an image edge or corner for drama

@@ -379,9 +379,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Composition Mode</span>
-        <span class="slider-value" id="val-composition_mode">0.50</span>
+        <span class="slider-value" id="val-composition_mode">0.20</span>
       </div>
-      <input type="range" id="sl-composition_mode" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-composition_mode" min="0" max="1" step="0.01" value="0.20"
              oninput="onSlider('composition_mode', this.value)" />
       <div class="slider-extremes"><span>Structured</span><span>Experimental</span></div>
     </div>
@@ -389,9 +389,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Background Presence</span>
-        <span class="slider-value" id="val-background_presence">0.50</span>
+        <span class="slider-value" id="val-background_presence">0.00</span>
       </div>
-      <input type="range" id="sl-background_presence" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-background_presence" min="0" max="1" step="0.01" value="0.00"
              oninput="onSlider('background_presence', this.value)" />
       <div class="slider-extremes"><span>Full-bleed</span><span>None</span></div>
     </div>
@@ -399,9 +399,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Cut Style Bias</span>
-        <span class="slider-value" id="val-cut_style_bias">0.50</span>
+        <span class="slider-value" id="val-cut_style_bias">0.30</span>
       </div>
-      <input type="range" id="sl-cut_style_bias" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-cut_style_bias" min="0" max="1" step="0.01" value="0.30"
              oninput="onSlider('cut_style_bias', this.value)" />
       <div class="slider-extremes"><span>Silhouette</span><span>Geometric</span></div>
     </div>
@@ -409,9 +409,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Morph Intensity</span>
-        <span class="slider-value" id="val-morph_intensity">0.50</span>
+        <span class="slider-value" id="val-morph_intensity">0.25</span>
       </div>
-      <input type="range" id="sl-morph_intensity" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-morph_intensity" min="0" max="1" step="0.01" value="0.25"
              oninput="onSlider('morph_intensity', this.value)" />
       <div class="slider-extremes"><span>Faithful</span><span>Extreme</span></div>
     </div>
@@ -419,9 +419,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Density</span>
-        <span class="slider-value" id="val-density">0.50</span>
+        <span class="slider-value" id="val-density">0.90</span>
       </div>
-      <input type="range" id="sl-density" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-density" min="0" max="1" step="0.01" value="0.90"
              oninput="onSlider('density', this.value)" />
       <div class="slider-extremes"><span>Sparse</span><span>Packed</span></div>
     </div>
@@ -429,9 +429,9 @@
     <div class="slider-group">
       <div class="slider-label">
         <span class="slider-name">Symmetry</span>
-        <span class="slider-value" id="val-symmetry">0.50</span>
+        <span class="slider-value" id="val-symmetry">0.75</span>
       </div>
-      <input type="range" id="sl-symmetry" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-symmetry" min="0" max="1" step="0.01" value="0.75"
              oninput="onSlider('symmetry', this.value)" />
       <div class="slider-extremes"><span>Asymmetric</span><span>Mirrored</span></div>
     </div>
@@ -441,7 +441,7 @@
         <span class="slider-name">Fragment Scatter</span>
         <span class="slider-value" id="val-fragment_scatter">0.50</span>
       </div>
-      <input type="range" id="sl-fragment_scatter" min="0" max="1" step="0.01" value="0.5"
+      <input type="range" id="sl-fragment_scatter" min="0" max="1" step="0.01" value="0.50"
              oninput="onSlider('fragment_scatter', this.value)" />
       <div class="slider-extremes"><span>Orderly</span><span>Chaotic</span></div>
     </div>
@@ -463,13 +463,13 @@
     wsReady: false,
     images: [],   // [{id, filename, status, meta}]
     sliders: {
-      composition_mode:    0.5,
-      background_presence: 0.5,
-      cut_style_bias:      0.5,
-      morph_intensity:     0.5,
-      density:             0.5,
-      symmetry:            0.5,
-      fragment_scatter:    0.5,
+      composition_mode:    0.20,
+      background_presence: 0.00,
+      cut_style_bias:      0.30,
+      morph_intensity:     0.25,
+      density:             0.90,
+      symmetry:            0.75,
+      fragment_scatter:    0.50,
     },
     zoom: 1.0,
     compositionImg: null,
