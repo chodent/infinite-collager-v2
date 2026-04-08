@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Infinite Collager V2</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ───────────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
+    #topbar h1 { font-size: 14px; font-weight: normal; color: #aaa; letter-spacing: 0.05em; }
+
+    #upload-btn {
+      padding: 5px 12px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #ccc;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    #upload-btn:hover { background: #333; border-color: #666; }
+    #file-input { display: none; }
+
+    #image-count { color: #666; font-size: 11px; }
+
+    #status {
+      margin-left: auto;
+      font-size: 11px;
+      color: #555;
+    }
+    #status.ok      { color: #5a5; }
+    #status.err     { color: #a55; }
+    #status.loading { color: #aaa; }
+
+    #regen-btn {
+      padding: 5px 12px;
+      background: #1e2e1e;
+      border: 1px solid #3a5a3a;
+      color: #8a8;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    #regen-btn:hover { background: #2a3e2a; }
+
+    /* ── Main area ─────────────────────────────────────────── */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Canvas ────────────────────────────────────────────── */
+    #canvas-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #0d0d0d;
+      position: relative;
+    }
+    #canvas { display: block; cursor: crosshair; image-rendering: pixelated; }
+    #canvas-placeholder {
+      position: absolute;
+      color: #333;
+      font-size: 13px;
+      text-align: center;
+      pointer-events: none;
+      line-height: 2;
+    }
+    #zoom-indicator {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      font-size: 11px;
+      color: #444;
+      pointer-events: none;
+    }
+
+    /* ── Sidebar ───────────────────────────────────────────── */
+    #sidebar {
+      width: 240px;
+      background: #161616;
+      border-left: 1px solid #2a2a2a;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    #sidebar-header {
+      padding: 10px 14px;
+      font-size: 11px;
+      color: #555;
+      border-bottom: 1px solid #222;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Sliders ───────────────────────────────────────────── */
+    .slider-group {
+      padding: 10px 14px;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 11px;
+      color: #888;
+    }
+    .slider-label .slider-name  { color: #aaa; }
+    .slider-label .slider-value { color: #666; font-size: 10px; }
+    .slider-extremes {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #444;
+      margin-top: 3px;
+    }
+    input[type="range"] {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: #2a2a2a;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      background: #666;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { background: #999; }
+
+    /* ── Upload list ───────────────────────────────────────── */
+    #upload-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #upload-list-header {
+      padding: 8px 14px 4px;
+      font-size: 10px;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      border-top: 1px solid #1e1e1e;
+    }
+    #upload-items {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 14px 8px;
+    }
+
+    .upload-item {
+      padding: 5px 0 4px;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .upload-item:last-child { border-bottom: none; }
+
+    .upload-item-name {
+      font-size: 11px;
+      color: #666;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+
+    .upload-item-status {
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.pending    { background: #444; }
+    .status-dot.processing { background: #aa7; animation: pulse 1s infinite; }
+    .status-dot.ready      { background: #5a5; }
+    .status-dot.error      { background: #a55; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    .status-text.pending    { color: #444; }
+    .status-text.processing { color: #aa7; }
+    .status-text.ready      { color: #5a5; }
+    .status-text.error      { color: #a55; }
+
+    /* Mini progress bar shown during processing */
+    .progress-bar-wrap {
+      height: 2px;
+      background: #222;
+      margin-top: 3px;
+      border-radius: 1px;
+      overflow: hidden;
+      display: none;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: #aa7;
+      width: 0%;
+      transition: width 0.2s;
+    }
+    .upload-item.processing .progress-bar-wrap { display: block; }
+
+    /* Dominant color swatches shown when ready */
+    .color-swatches {
+      display: flex;
+      gap: 2px;
+      margin-top: 3px;
+    }
+    .color-swatch {
+      width: 10px; height: 10px;
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+
+    #clear-btn {
+      margin: 6px 14px 8px;
+      padding: 4px 10px;
+      background: #1e1818;
+      border: 1px solid #3a2a2a;
+      color: #755;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 11px;
+      display: none;
+    }
+    #clear-btn:hover { background: #2a1e1e; }
+
+    .test-cuts-btn {
+      font-size: 9px;
+      padding: 1px 5px;
+      background: #1a1e2a;
+      border: 1px solid #2a3a5a;
+      color: #66a;
+      cursor: pointer;
+      font-family: monospace;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    .test-cuts-btn:hover { background: #222e42; }
+
+    /* ── Cut test panel ──────────────────────────────────── */
+    #cut-test-panel {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #181818;
+      border: 1px solid #333;
+      padding: 14px;
+      z-index: 100;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    #cut-test-panel h2 {
+      font-size: 12px;
+      color: #888;
+      font-weight: normal;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    #cut-test-close {
+      float: right;
+      cursor: pointer;
+      color: #666;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+    #cut-test-close:hover { color: #ccc; }
+    #cut-test-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .cut-test-item {
+      text-align: center;
+    }
+    .cut-test-item img {
+      display: block;
+      max-width: 200px;
+      max-height: 200px;
+      background: repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 0 0 / 10px 10px;
+      border: 1px solid #2a2a2a;
+    }
+    .cut-test-label {
+      font-size: 10px;
+      color: #555;
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    #cut-test-loading {
+      color: #666;
+      font-size: 12px;
+      padding: 20px;
+    }
+    #cut-test-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 99;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ─────────────────────────────────────────────── -->
+<div id="topbar">
+  <h1>INFINITE COLLAGER V2</h1>
+  <button id="upload-btn" onclick="document.getElementById('file-input').click()">Upload Photos</button>
+  <input type="file" id="file-input" accept="image/*" multiple />
+  <span id="image-count">0 / 10 images</span>
+  <button id="regen-btn" onclick="requestComposition()">Regenerate</button>
+  <span id="status">connecting…</span>
+</div>
+
+<!-- ── Cut test panel ──────────────────────────────────────── -->
+<div id="cut-test-backdrop" onclick="closeCutTest()"></div>
+<div id="cut-test-panel">
+  <h2>Cut Test <span id="cut-test-close" onclick="closeCutTest()">✕</span></h2>
+  <div id="cut-test-loading">Generating cuts…</div>
+  <div id="cut-test-grid"></div>
+</div>
+
+<!-- ── Main ────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Canvas -->
+  <div id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div id="canvas-placeholder">Upload photos and click Regenerate<br>to generate a collage</div>
+    <div id="zoom-indicator">zoom: 1.00×</div>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">Composition Controls</div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Composition Mode</span>
+        <span class="slider-value" id="val-composition_mode">0.50</span>
+      </div>
+      <input type="range" id="sl-composition_mode" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('composition_mode', this.value)" />
+      <div class="slider-extremes"><span>Structured</span><span>Experimental</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Background Presence</span>
+        <span class="slider-value" id="val-background_presence">0.50</span>
+      </div>
+      <input type="range" id="sl-background_presence" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('background_presence', this.value)" />
+      <div class="slider-extremes"><span>Full-bleed</span><span>None</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Cut Style Bias</span>
+        <span class="slider-value" id="val-cut_style_bias">0.50</span>
+      </div>
+      <input type="range" id="sl-cut_style_bias" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('cut_style_bias', this.value)" />
+      <div class="slider-extremes"><span>Silhouette</span><span>Geometric</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Morph Intensity</span>
+        <span class="slider-value" id="val-morph_intensity">0.50</span>
+      </div>
+      <input type="range" id="sl-morph_intensity" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('morph_intensity', this.value)" />
+      <div class="slider-extremes"><span>Faithful</span><span>Extreme</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Density</span>
+        <span class="slider-value" id="val-density">0.50</span>
+      </div>
+      <input type="range" id="sl-density" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('density', this.value)" />
+      <div class="slider-extremes"><span>Sparse</span><span>Packed</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Symmetry</span>
+        <span class="slider-value" id="val-symmetry">0.50</span>
+      </div>
+      <input type="range" id="sl-symmetry" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('symmetry', this.value)" />
+      <div class="slider-extremes"><span>Asymmetric</span><span>Mirrored</span></div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="slider-name">Fragment Scatter</span>
+        <span class="slider-value" id="val-fragment_scatter">0.50</span>
+      </div>
+      <input type="range" id="sl-fragment_scatter" min="0" max="1" step="0.01" value="0.5"
+             oninput="onSlider('fragment_scatter', this.value)" />
+      <div class="slider-extremes"><span>Orderly</span><span>Chaotic</span></div>
+    </div>
+
+    <!-- Upload list -->
+    <div id="upload-section">
+      <div id="upload-list-header">Uploaded Images</div>
+      <div id="upload-items"></div>
+      <button id="clear-btn" onclick="clearImages()">Clear All Images</button>
+    </div>
+
+  </div><!-- /sidebar -->
+</div><!-- /main -->
+
+<script>
+  // ── State ─────────────────────────────────────────────────
+  const state = {
+    ws: null,
+    wsReady: false,
+    images: [],   // [{id, filename, status, meta}]
+    sliders: {
+      composition_mode:    0.5,
+      background_presence: 0.5,
+      cut_style_bias:      0.5,
+      morph_intensity:     0.5,
+      density:             0.5,
+      symmetry:            0.5,
+      fragment_scatter:    0.5,
+    },
+    zoom: 1.0,
+    compositionImg: null,
+  };
+
+  // ── Canvas ────────────────────────────────────────────────
+  const canvas = document.getElementById('canvas');
+  const ctx    = canvas.getContext('2d');
+  const wrap   = document.getElementById('canvas-wrap');
+
+  function resizeCanvas() {
+    canvas.width  = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+    if (state.compositionImg) drawComposition();
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  function drawComposition() {
+    if (!state.compositionImg) return;
+    const img   = state.compositionImg;
+    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+    const dw    = img.width  * scale * state.zoom;
+    const dh    = img.height * scale * state.zoom;
+    const dx    = (canvas.width  - dw) / 2;
+    const dy    = (canvas.height - dh) / 2;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, dx, dy, dw, dh);
+    document.getElementById('canvas-placeholder').style.display = 'none';
+  }
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    state.zoom = Math.max(0.1, Math.min(20, state.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+    document.getElementById('zoom-indicator').textContent = `zoom: ${state.zoom.toFixed(2)}×`;
+    drawComposition();
+  }, { passive: false });
+
+  // ── WebSocket ─────────────────────────────────────────────
+  function connectWS() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    state.ws = ws;
+
+    ws.onopen  = () => { state.wsReady = true; setStatus('connected', 'ok'); };
+    ws.onclose = () => {
+      state.wsReady = false;
+      setStatus('disconnected — retrying…', 'err');
+      setTimeout(connectWS, 2000);
+    };
+    ws.onerror = () => setStatus('ws error', 'err');
+    ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+  }
+
+  function handleMessage(msg) {
+    switch (msg.type) {
+      case 'connected':
+        setStatus('ready', 'ok');
+        break;
+
+      case 'images_updated':
+        state.images = msg.images || [];
+        renderImageList();
+        break;
+
+      case 'preprocess_start':
+        _setImageStatus(msg.image_id, 'processing', 'starting…');
+        break;
+
+      case 'preprocess_progress':
+        _setImageStatus(msg.image_id, 'processing', msg.message,
+                        msg.step, msg.total);
+        break;
+
+      case 'preprocess_done': {
+        const entry = state.images.find(i => i.id === msg.image_id);
+        if (entry) { entry.status = 'ready'; entry.meta = msg.meta; }
+        _setImageStatus(msg.image_id, 'ready', 'ready', undefined, undefined, true);
+        _updateSwatches(msg.image_id, msg.meta);
+        setStatus(`${_readyCount()} / ${state.images.length} ready`, 'ok');
+        break;
+      }
+
+      case 'preprocess_error':
+        _setImageStatus(msg.image_id, 'error', msg.error || 'error');
+        break;
+
+      case 'composition':
+        loadCompositionImage(msg.image);
+        setStatus('ready', 'ok');
+        break;
+
+      case 'pong':
+        break;
+    }
+  }
+
+  function _readyCount() {
+    return state.images.filter(i => i.status === 'ready').length;
+  }
+
+  // ── Per-image status helpers ──────────────────────────────
+
+  function _setImageStatus(imageId, status, message, step, total, showTestBtn = false) {
+    const el = document.getElementById(`item-${imageId}`);
+    if (!el) return;
+    el.className = `upload-item ${status}`;
+
+    const dot  = el.querySelector('.status-dot');
+    const text = el.querySelector('.status-text');
+    if (dot)  { dot.className  = `status-dot  ${status}`; }
+    if (text) { text.className = `status-text ${status}`; text.textContent = message; }
+
+    if (step !== undefined && total !== undefined) {
+      const fill = el.querySelector('.progress-bar-fill');
+      if (fill) fill.style.width = `${Math.round((step / total) * 100)}%`;
+    }
+
+    // Add test-cuts button when ready (if not already present)
+    if (showTestBtn && !el.querySelector('.test-cuts-btn')) {
+      const statusRow = el.querySelector('.upload-item-status');
+      if (statusRow) {
+        const btn = document.createElement('button');
+        btn.className = 'test-cuts-btn';
+        btn.textContent = 'test cuts';
+        btn.onclick = () => openCutTest(imageId);
+        statusRow.appendChild(btn);
+      }
+    }
+  }
+
+  function _updateSwatches(imageId, meta) {
+    const el = document.getElementById(`item-${imageId}`);
+    if (!el || !meta || !meta.dominant_colors) return;
+    let swatches = el.querySelector('.color-swatches');
+    if (!swatches) {
+      swatches = document.createElement('div');
+      swatches.className = 'color-swatches';
+      el.appendChild(swatches);
+    }
+    swatches.innerHTML = '';
+    meta.dominant_colors.slice(0, 5).forEach(c => {
+      const s = document.createElement('div');
+      s.className = 'color-swatch';
+      s.style.background = `rgb(${c.r},${c.g},${c.b})`;
+      swatches.appendChild(s);
+    });
+  }
+
+  // ── Image list rendering ──────────────────────────────────
+  function renderImageList() {
+    const container = document.getElementById('upload-items');
+    const clearBtn  = document.getElementById('clear-btn');
+    document.getElementById('image-count').textContent =
+      `${state.images.length} / 10 images`;
+
+    // Build / update DOM items
+    // Remove items for images that no longer exist
+    const existingIds = new Set(state.images.map(i => i.id));
+    Array.from(container.children).forEach(el => {
+      if (!existingIds.has(el.dataset.imageId)) el.remove();
+    });
+
+    state.images.forEach(img => {
+      let el = document.getElementById(`item-${img.id}`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = `upload-item ${img.status}`;
+        el.id = `item-${img.id}`;
+        el.dataset.imageId = img.id;
+        el.innerHTML = `
+          <div class="upload-item-name">${escHtml(img.filename)}</div>
+          <div class="upload-item-status">
+            <div class="status-dot ${img.status}"></div>
+            <span class="status-text ${img.status}">${img.status}</span>
+            ${img.status === 'ready' ? `<button class="test-cuts-btn" onclick="openCutTest('${img.id}')">test cuts</button>` : ''}
+          </div>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill"></div></div>
+        `;
+        container.appendChild(el);
+      }
+      // If we already have meta (e.g. restored from server list), show swatches
+      if (img.status === 'ready' && img.meta) {
+        _updateSwatches(img.id, img.meta);
+      }
+    });
+
+    clearBtn.style.display = state.images.length ? 'block' : 'none';
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Upload ────────────────────────────────────────────────
+  document.getElementById('file-input').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    const remaining = 10 - state.images.length;
+    const toUpload  = files.slice(0, remaining);
+    if (!toUpload.length) { setStatus('max 10 images', 'err'); return; }
+
+    setStatus('uploading…', 'loading');
+    const fd = new FormData();
+    toUpload.forEach(f => fd.append('files', f));
+
+    try {
+      const res  = await fetch('/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      setStatus(`uploaded ${data.uploaded.length} — preprocessing…`, 'loading');
+    } catch {
+      setStatus('upload failed', 'err');
+    }
+    e.target.value = '';
+  });
+
+  async function clearImages() {
+    await fetch('/images', { method: 'DELETE' });
+    state.images = [];
+    renderImageList();
+    setStatus('cleared', 'ok');
+  }
+
+  // ── Sliders ───────────────────────────────────────────────
+  function onSlider(name, value) {
+    state.sliders[name] = parseFloat(value);
+    document.getElementById(`val-${name}`).textContent = parseFloat(value).toFixed(2);
+    sendWS({ type: 'slider_change', sliders: state.sliders });
+  }
+
+  // ── Composition ───────────────────────────────────────────
+  function requestComposition() {
+    setStatus('generating…', 'loading');
+    sendWS({ type: 'request_composition', sliders: state.sliders });
+  }
+
+  function loadCompositionImage(dataUrl) {
+    const img  = new Image();
+    img.onload = () => { state.compositionImg = img; drawComposition(); };
+    img.src    = dataUrl;
+  }
+
+  // ── WS send ───────────────────────────────────────────────
+  function sendWS(obj) {
+    if (state.ws && state.wsReady) state.ws.send(JSON.stringify(obj));
+  }
+
+  // ── Status ────────────────────────────────────────────────
+  function setStatus(text, cls = '') {
+    const el = document.getElementById('status');
+    el.textContent = text;
+    el.className   = cls;
+  }
+
+  // ── Cut test panel ────────────────────────────────────────
+  const CUT_LABELS = {
+    silhouette:         'Silhouette',
+    tear:               'Loose Tear',
+    geometric_rect:     'Geometric — Rect',
+    geometric_strip:    'Geometric — Strip',
+    geometric_triangle: 'Geometric — Triangle',
+    geometric_wedge:    'Geometric — Wedge',
+    raw:                'Raw Crop',
+    morph_compress_x:       'Morph — Compress X',
+    morph_stretch_x:        'Morph — Stretch X',
+    morph_rotate:           'Morph — Rotate',
+    morph_diagonal_stretch: 'Morph — Diagonal Stretch',
+    morph_shear:            'Morph — Shear',
+    morph_combined:         'Morph — Combined',
+  };
+
+  const CUT_SECTION_KEYS  = ['silhouette','tear','geometric_rect','geometric_strip','geometric_triangle','geometric_wedge','raw'];
+  const MORPH_SECTION_KEYS = ['morph_compress_x','morph_stretch_x','morph_rotate','morph_diagonal_stretch','morph_shear','morph_combined'];
+
+  function _buildSection(title, keys, data, grid) {
+    const header = document.createElement('div');
+    header.style.cssText = 'width:100%;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:0.1em;padding:8px 0 4px;border-top:1px solid #222;margin-top:4px';
+    header.textContent = title;
+    grid.appendChild(header);
+
+    keys.forEach(key => {
+      if (!(key in data)) return;
+      const src  = data[key];
+      const item = document.createElement('div');
+      item.className = 'cut-test-item';
+      if (src) {
+        item.innerHTML = `
+          <img src="${src}" alt="${key}" />
+          <div class="cut-test-label">${CUT_LABELS[key] || key}</div>
+        `;
+      } else {
+        item.innerHTML = `
+          <div style="width:160px;height:120px;background:#1a1a1a;border:1px solid #2a2a2a;display:flex;align-items:center;justify-content:center;color:#444;font-size:10px">failed</div>
+          <div class="cut-test-label">${CUT_LABELS[key] || key}</div>
+        `;
+      }
+      grid.appendChild(item);
+    });
+  }
+
+  async function openCutTest(imageId) {
+    const panel    = document.getElementById('cut-test-panel');
+    const backdrop = document.getElementById('cut-test-backdrop');
+    const loading  = document.getElementById('cut-test-loading');
+    const grid     = document.getElementById('cut-test-grid');
+
+    grid.innerHTML    = '';
+    loading.style.display = 'block';
+    panel.style.display   = 'block';
+    backdrop.style.display = 'block';
+
+    try {
+      const res  = await fetch(`/test-cuts/${imageId}`);
+      const data = await res.json();
+      loading.style.display = 'none';
+
+      if (data.error) {
+        grid.innerHTML = `<div style="color:#a55;font-size:12px">${data.error}</div>`;
+        return;
+      }
+
+      _buildSection('Cuts', CUT_SECTION_KEYS, data, grid);
+      _buildSection('Morphs (applied to silhouette)', MORPH_SECTION_KEYS, data, grid);
+    } catch (err) {
+      loading.style.display = 'none';
+      grid.innerHTML = `<div style="color:#a55;font-size:12px">Request failed: ${err}</div>`;
+    }
+  }
+
+  function closeCutTest() {
+    document.getElementById('cut-test-panel').style.display    = 'none';
+    document.getElementById('cut-test-backdrop').style.display = 'none';
+  }
+
+  // ── Init ──────────────────────────────────────────────────
+  connectWS();
+</script>
+</body>
+</html>
