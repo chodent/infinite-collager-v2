@@ -64,6 +64,18 @@
     }
     #regen-btn:hover { background: #2a3e2a; }
 
+    #export-btn {
+      padding: 5px 12px;
+      background: #1e1e2e;
+      color: #aab;
+      border: 1px solid #334;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #export-btn:hover:not(:disabled) { background: #272740; }
+    #export-btn:disabled { opacity: 0.35; cursor: default; }
+
     /* ── Main area ─────────────────────────────────────────── */
     #main {
       display: flex;
@@ -488,6 +500,7 @@
   <input type="file" id="file-input" accept="image/*" multiple />
   <span id="image-count">0 / 10 images</span>
   <button id="regen-btn" onclick="requestComposition()">Regenerate</button>
+  <button id="export-btn" onclick="exportCollage()" disabled>Export</button>
   <span id="status">connecting…</span>
 </div>
 
@@ -971,6 +984,7 @@
         }
       } else {
         state.currentLayer       = img;
+        state.lastImageData      = dataUrl;
         state.zoom               = 1.0;
         state.panX               = 0;
         state.panY               = 0;
@@ -978,6 +992,7 @@
         state.awaitingTransition = false;
         state.nextLayer          = null;
         document.getElementById('canvas-placeholder').style.display = 'none';
+        document.getElementById('export-btn').disabled = false;
         setStatus('ready', 'ok');
       }
     };
@@ -1194,6 +1209,15 @@
   }
 
   // ── Composition ───────────────────────────────────────────────────────────────
+  function exportCollage() {
+    if (!state.lastImageData) return;
+    const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const a   = document.createElement('a');
+    a.href     = state.lastImageData;
+    a.download = `collage-${ts}.jpg`;
+    a.click();
+  }
+
   function requestComposition() {
     state.compositionRole = 'current';
     setStatus('generating…', 'loading');
