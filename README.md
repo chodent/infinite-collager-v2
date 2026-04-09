@@ -150,7 +150,7 @@ The **image priority weighting** toggle (off by default) makes images higher in 
 
 V2 is the foundation. The goal was always to build something that feels handmade and endlessly explorable — and V2 gets there. But there's a lot more left to realize.
 
-The continuation (V3) picks up at Phase 6 and will focus on making the infinite zoom feel truly fractal rather than just generative — where zooming in reveals compositions that visually echo the layer above, borrowing shapes and silhouettes from what the camera just left. The physical transition between layers (currently a cross-dissolve) should feel like tearing through paper.
+The continuation (V3) picks up at Phase 6 and will focus on making the infinite zoom feel truly fractal rather than just generative — where zooming in reveals compositions that visually echo the layer above, borrowing shapes and silhouettes from what the camera just left. The physical transition between layers (currently a cross-dissolve) should feel like zooming into a fractal.
 
 Other priorities for the next version:
 
@@ -161,7 +161,7 @@ Other priorities for the next version:
 - **Breathing animation** — very slight, slow position drift on stamps over time, making the collage feel alive
 - **Fullscreen and keyboard shortcuts**
 
-The aesthetic north star stays the same: Gee Vaucher, hand-cut zine work, physical collage. Not a filter. Not AI-generated. An automated collage artist.
+The aesthetic north star stays the same
 
 ---
 
