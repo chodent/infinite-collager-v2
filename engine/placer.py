@@ -406,10 +406,11 @@ def _framed(role_list, spec, cw, ch, rng):
             # Pack into border zone with guaranteed visible size
             pw, ph = _detail_size(cw, ch, rng)
             side = rng.randint(0, 3)
+            def _ri(a, b): return rng.randint(min(a, b), max(a, b))
             if side == 0:   px, py = rng.randint(0, max(1, cw - pw)), rng.randint(0, max(1, border))
-            elif side == 1: px, py = rng.randint(0, max(1, cw - pw)), rng.randint(max(0, ch - border), max(0, ch - ph))
+            elif side == 1: px, py = rng.randint(0, max(1, cw - pw)), _ri(max(0, ch - border), max(0, ch - ph))
             elif side == 2: px, py = rng.randint(0, max(1, border)),  rng.randint(0, max(1, ch - ph))
-            else:           px, py = rng.randint(max(0, cw - border), max(0, cw - pw)), rng.randint(0, max(1, ch - ph))
+            else:           px, py = _ri(max(0, cw - border), max(0, cw - pw)), rng.randint(0, max(1, ch - ph))
             px = max(0, min(px, cw - 1))
             py = max(0, min(py, ch - 1))
             p.update(px=px, py=py, pw=pw, ph=ph, rotation=_rot(spec, rng, 1.0))
