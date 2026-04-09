@@ -98,38 +98,55 @@ def _make_background(
     rng:        random.Random,
 ) -> Image.Image:
     """Create the base canvas (RGBA so we can alpha-composite stamps onto it)."""
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (20, 18, 16, 255))
+    canvas     = Image.new("RGBA", (canvas_w, canvas_h), (20, 18, 16, 255))
+    tonal_hint = spec.get("tonal_hint")
 
     if spec["bg_type"] == "color":
-        entry  = rng.choice(image_pool)
-        colors = entry["meta"].get("dominant_colors", [])
-        if colors:
-            c = rng.choice(colors[:3])
-            r = max(0, int(c["r"] * 0.55))
-            g = max(0, int(c["g"] * 0.55))
-            b = max(0, int(c["b"] * 0.55))
-            canvas.paste(Image.new("RGBA", (canvas_w, canvas_h), (r, g, b, 255)))
+        if tonal_hint:
+            r = max(0, int(tonal_hint["r"] * 0.60))
+            g = max(0, int(tonal_hint["g"] * 0.60))
+            b = max(0, int(tonal_hint["b"] * 0.60))
+        else:
+            entry  = rng.choice(image_pool)
+            colors = entry["meta"].get("dominant_colors", [])
+            if colors:
+                c = rng.choice(colors[:3])
+                r = max(0, int(c["r"] * 0.55))
+                g = max(0, int(c["g"] * 0.55))
+                b = max(0, int(c["b"] * 0.55))
+            else:
+                r, g, b = 20, 18, 16
+        canvas.paste(Image.new("RGBA", (canvas_w, canvas_h), (r, g, b, 255)))
 
     elif spec["bg_type"] == "photo":
         # Full-bleed: load a random pool image, resize to fill the canvas, paste directly
         entry = rng.choice(image_pool)
         try:
-            bg = Image.open(entry["path"]).convert("RGBA")
-            # Cover-fit: scale so the image fills the canvas with no black bars
+            bg      = Image.open(entry["path"]).convert("RGBA")
             bw, bh  = bg.size
             scale   = max(canvas_w / bw, canvas_h / bh)
             new_w   = int(bw * scale)
             new_h   = int(bh * scale)
             bg      = bg.resize((new_w, new_h), Image.LANCZOS)
-            # Center crop
             left    = (new_w - canvas_w) // 2
             top     = (new_h - canvas_h) // 2
             bg      = bg.crop((left, top, left + canvas_w, top + canvas_h))
             canvas.paste(bg, (0, 0))
         except Exception as e:
             print(f"[compositor] bg photo failed: {e}")
+        if tonal_hint:
+            tint = Image.new("RGBA", (canvas_w, canvas_h),
+                             (int(tonal_hint["r"] * 0.25),
+                              int(tonal_hint["g"] * 0.25),
+                              int(tonal_hint["b"] * 0.25), 65))
+            canvas.alpha_composite(tint)
 
-    # bg_type == "none": leave dark canvas
+    elif spec["bg_type"] == "none" and tonal_hint:
+        r = max(0, int(tonal_hint["r"] * 0.18))
+        g = max(0, int(tonal_hint["g"] * 0.18))
+        b = max(0, int(tonal_hint["b"] * 0.18))
+        canvas.paste(Image.new("RGBA", (canvas_w, canvas_h), (r, g, b, 255)))
+
     return canvas
 
 
@@ -206,6 +223,7 @@ def compose(
     seed:       Optional[int] = None,
     canvas_w:   int = 1200,
     canvas_h:   int = 900,
+    tonal_hint: Optional[dict] = None,
 ) -> Image.Image:
     if not image_pool:
         return _blank_canvas(canvas_w, canvas_h)
@@ -215,6 +233,8 @@ def compose(
 
     rng  = random.Random(seed)
     spec = rules.interpret_sliders(sliders, seed)
+    if tonal_hint:
+        spec["tonal_hint"] = tonal_hint
 
     # ── Pre-load all pool images once (use work_path for speed) ───────────────
     loaded_pool = []

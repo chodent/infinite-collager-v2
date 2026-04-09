@@ -394,108 +394,89 @@ infinite-collager-v2/
 
 ## 8. Phased Build Plan
 
-### Phase 0: Foundation (Do First)
+### Phase 0: Foundation ✓ COMPLETE (user-confirmed)
 **Goal:** Skeleton project with image upload, basic display, and communication working.
 
-- [ ] Set up project directory structure
-- [ ] Create `server.py` with FastAPI/Flask: static file serving on port 6969, WebSocket endpoint, image upload endpoint
-- [ ] Create `index.html` with: canvas element, file upload UI, WebSocket client, basic slider UI (all 7 sliders)
-- [ ] Implement image upload flow: user selects files → sends to backend → backend stores in `uploads/` → confirms receipt
-- [ ] Backend returns a simple test image to canvas to confirm the pipeline works end-to-end
-- [ ] Create `requirements.txt` with initial dependencies
-- [ ] Create `CLAUDE.md` with project rules (carried from v1 + new v2 rules)
+- [x] Set up project directory structure
+- [x] Create `server.py` with FastAPI: static file serving on port 6969, WebSocket endpoint, image upload endpoint
+- [x] Create `index.html` with: canvas element, file upload UI, WebSocket client, basic slider UI (all 7 sliders)
+- [x] Implement image upload flow: user selects files → sends to backend → backend stores in `uploads/` → confirms receipt
+- [x] Backend returns a simple test image to canvas to confirm the pipeline works end-to-end
+- [x] Create `requirements.txt` with initial dependencies
+- [x] Create `CLAUDE.md` with project rules
 
-**Deliverable:** Upload photos, see a test image on canvas, sliders exist but don't do anything yet.
+**Deliverable:** Upload photos, see a test image on canvas, sliders exist but don't do anything yet. ✓
 
-### Phase 1: Preprocessing Pipeline
+### Phase 1: Preprocessing Pipeline ✓ COMPLETE (user-confirmed)
 **Goal:** Every uploaded image gets analyzed and prepared for stamp creation.
 
-- [ ] Implement `preprocessor.py`:
-  - Subject mask generation using `rembg` (U2Net model, no GPU required)
-  - Dominant color extraction (k-means clustering on image pixels)
-  - Content variance map (identify high-detail vs. blank regions)
-  - Edge map generation (Canny edge detection via OpenCV)
-  - Store all outputs in `cache/` as: `{image_hash}_mask.png`, `{image_hash}_edges.png`, `{image_hash}_meta.json`
-- [ ] Wire preprocessing into upload flow: upload → preprocess → ready signal to frontend
-- [ ] Frontend shows preprocessing progress indicator
+- [x] Implement `preprocessor.py`:
+  - Subject mask generation using `rembg[cpu]` (U2Net model, no GPU required); falls back to GrabCut if onnxruntime unavailable
+  - Dominant color extraction (k-means, 5 clusters, 6000-pixel subsample)
+  - Content variance map (local std dev kernel=15)
+  - Edge map (Canny, GaussianBlur pre-filter)
+  - Work copy generation (max 900px longest side) for fast stamp loading
+  - All outputs cached in `cache/` as `{hash}_mask.png`, `{hash}_edges.png`, `{hash}_variance.png`, `{hash}_work.jpg`, `{hash}_meta.json`
+- [x] Wire preprocessing into upload flow: upload → preprocess → ready signal to frontend
+- [x] Frontend shows preprocessing progress indicator per image
 
-**Deliverable:** Upload photos, backend processes them and generates masks/metadata. Can view masks in cache directory to verify quality.
+**Deliverable:** Upload photos, backend processes them and generates masks/metadata. ✓
 
-### Phase 2: Cut Path Generation
+### Phase 2: Cut Path Generation ✓ COMPLETE (user-confirmed)
 **Goal:** Generate the four cut types with humanized edges.
 
-- [ ] Implement `cutter.py`:
-  - **Silhouette cut:** Take subject mask → find contour → apply wobble displacement along path → occasional straight segments → output RGBA image with transparent background
-  - **Loose tear:** Generate random organic blob shape (Perlin noise boundary) → loosely bias toward subject mask → apply as clip mask → output RGBA
-  - **Geometric cut:** Generate rectangle/strip/triangle/polygon from parameters → apply as clip mask → output RGBA
-  - **Raw crop:** Simple rectangular crop → output RGBA
-- [ ] Wobble algorithm: walk along contour, at each point add displacement = `perlin_noise(t * freq) * amplitude`. Amplitude and frequency controlled by randomness. Occasionally snap to straight line for 5-20 pixels (scissors direction change).
-- [ ] Test all four cut types independently — generate sample stamps from test images
+- [x] Implement `cutter.py`: silhouette, tear, geometric (rect/strip_h/strip_v/triangle/wedge), raw
+- [x] Wobble: opensimplex noise walk along contour; amplitude+frequency vary per seed; occasional straight segments
+- [x] Loose tear: independent rx/ry noise fields + random spike perturbations
+- [x] Triangle: scalene, seeded; wedge: apex at image corner for dramatic fan
+- [x] `/test-cuts/{image_id}` endpoint + frontend visual QA panel
 
-**Deliverable:** Given an image + cut type + parameters, produce a properly cut RGBA stamp. Visual verification that silhouette cuts look hand-cut, not digitally perfect.
+**Deliverable:** All four cut types produce hand-cut-looking RGBA stamps. ✓
 
-### Phase 3: Morphing
+### Phase 3: Morphing ✓ COMPLETE (user-confirmed)
 **Goal:** Stamps can be stretched, compressed, and deformed.
 
-- [ ] Implement `morpher.py`:
-  - Horizontal compression/stretch (independent X scale)
-  - Vertical compression/stretch (independent Y scale)
-  - Combined deformations
-  - Input: RGBA stamp image + morph parameters → Output: deformed RGBA stamp
-- [ ] Morph parameters derived from Morph Intensity slider value + random variation
-- [ ] Test: take a silhouette-cut figure, compress it into a tall thin sliver. Take a landscape crop, stretch it into a wide ribbon.
+- [x] Implement `morpher.py`: compress_x, stretch_x, compress_y, stretch_y, rotate, flip_h, flip_v, diagonal_stretch, combined
+- [x] `shear` repurposed: cuts an irregular polygon fragment (jagged edges, tight-cropped) — not a geometric lean
+- [x] Morph test row in cut test panel
 
-**Deliverable:** Morphing works on pre-cut stamps. Visual verification of deformation range.
+**Deliverable:** Morphing works on pre-cut stamps. ✓
 
-### Phase 4: Composition Engine — Basic
+### Phase 4: Composition Engine ✓ BUILT (iterated, not formally user-confirmed)
 **Goal:** Generate a complete collage composition from the image pool.
 
-- [ ] Implement `rules.py`:
-  - Interpret slider values into concrete parameters
-  - Assign stamp roles (background, dominant, supporting, detail, strips) based on Density slider
-  - Select composition mode based on Composition Mode slider
-  - Determine stamp count per role
+- [x] `engine/rules.py`: all 7 sliders → CompositionSpec (mode, stamp counts, role breakdown, cut weights, morph probability/intensity, rotation range, bleed, symmetry)
+- [x] `engine/placer.py`: scenic, symmetric, radial, framed, experimental (blends two modes)
+- [x] `engine/compositor.py`: full pipeline — roles → cut_stamp → morph_stamp (parallel) → alpha-composite (serial, z-order). Blend modes per role (normal/multiply/screen/overlay/soft_light). Work copies used for speed.
+- [x] `server.py`: `_run_composition()` wired up, runs in `asyncio.to_thread`, returns JPEG base64 (Option A)
+- [x] Background: full-bleed photo, dominant-colour wash, or dark canvas — per background_presence slider
 
-- [ ] Implement `placer.py` — placement logic for each composition mode:
-  - **Scenic:** Place dominant element center-ish. Supporting elements distributed with size suggesting depth. Details scattered.
-  - **Symmetric:** Calculate mirror axis. Place stamps on one side, mirror to other. Center 1-2 elements on axis.
-  - **Radial:** Place dominant element at center. Fan supporting elements outward at varied angles. Pack details at periphery.
-  - **Framed:** Generate dense border region with small fragments. Place larger elements in interior.
-  - **Experimental:** Blend parameters from multiple modes with random weighting.
+**Deliverable:** Upload photos, adjust sliders, see a generated collage on canvas. ✓
 
-- [ ] Implement `compositor.py`:
-  - Orchestrate the full pipeline: read sliders → assign roles → select images → cut stamps → morph stamps → place stamps → return stamp data packet
-  - For each stamp: select source image from pool (weighted random, allowing repeats), select cut type (weighted by Cut Style Bias slider), generate cut, apply morph, compute placement
-
-- [ ] Wire compositor to backend API: frontend requests composition → backend runs compositor → returns stamp data JSON → frontend renders stamps on canvas
-
-**Deliverable:** Upload photos, adjust sliders, see a generated collage composition on canvas. The composition should visibly respond to slider changes.
-
-### Phase 5: Zoom Interaction
+### Phase 5: Zoom Interaction ✓ BUILT (2026-04-08, not yet user-confirmed)
 **Goal:** Scroll to zoom, trigger new compositions at depth.
 
-- [ ] Implement scroll zoom on frontend canvas:
-  - Mouse wheel → geometric zoom centered on cursor position
-  - Smooth zoom animation (not instant jump)
-  - Track current zoom level and center position
+- [x] Implement scroll zoom on frontend canvas:
+  - Mouse wheel → cursor-centred geometric zoom
+  - requestAnimationFrame render loop (smooth, not event-driven)
+  - Track zoom, panX, panY
 
-- [ ] Implement zoom threshold detection:
-  - When zoom exceeds a threshold (e.g., 2×), request a new composition from backend
-  - Pass the current visible region's stamps/tonal info as context
-  - Backend generates new composition, optionally incorporating fragments from previous level
+- [x] Implement zoom threshold detection:
+  - Pre-gen trigger at 2× (captures context crop + tonal hint)
+  - Transition trigger at 3.5×
+  - Zoom-out trigger at 0.5× (restores previous layer)
 
-- [ ] Implement layer management on frontend:
-  - Current composition layer
-  - Next composition layer (loading/ready)
-  - Previous composition layer (cached for zoom-out)
-  - At minimum: keep 3 layers in memory (previous, current, next)
+- [x] Implement layer management on frontend:
+  - currentLayer / nextLayer / layerStack[] (max 3 deep)
+  - awaitingTransition flag fires transition as soon as nextLayer arrives
 
-- [ ] Implement transition between compositions:
-  - The new composition emerges from within the zoomed region
-  - Explore: spatial dissolve (per-region hash snap from v1), stamp-by-stamp assembly, paper-tear effect
-  - Tonal bridge: new composition's initial color palette influenced by zoomed region
+- [x] Implement transition between compositions:
+  - 600ms eased cross-dissolve (in and out)
+  - Tonal hint: avg colour of visible crop biases new composition's background
+  - Context crop: visible viewport added as pool image in backend (collage-of-collage)
+  - NOTE: physical paper-tear transition NOT built — deferred to Phase 7
 
-**Deliverable:** Upload photos → see collage → scroll to zoom → new collage generates at depth → repeat infinitely. Smooth transitions between levels.
+**Deliverable:** Upload photos → see collage → scroll to zoom → new collage generates at depth → repeat infinitely. ✓
 
 ### Phase 6: Shape Borrowing & Collage-of-Collage
 **Goal:** Advanced stamp generation techniques.
@@ -652,34 +633,94 @@ These don't need answers now — they'll be resolved during implementation:
 
 *Append entries here as implementation diverges from the plan or decisions are made.*
 
+---
+
 ### 2026-04-08 — Phases 0–4 complete
 
-**Phase 0 (Foundation):** Complete and confirmed working.
+**Phase 0 (Foundation):** Complete and user-confirmed.
 
-**Phase 1 (Preprocessing):** Complete and confirmed working.
+**Phase 1 (Preprocessing):** Complete and user-confirmed.
 - `rembg` requires installation as `rembg[cpu]` (not bare `rembg`) to pull in `onnxruntime`. Updated in `requirements.txt`.
 - If `onnxruntime` has no wheel for the current Python version, `preprocessor.py` catches `SystemExit` (not just `Exception`) and falls back to an OpenCV GrabCut mask. GrabCut is rougher but functional.
+- Preprocessor generates a downscaled work copy (max 900px, `{hash}_work.jpg`) alongside the full-resolution file. Compositor loads work copies for stamp generation speed; mask paths still reference full-res masks.
 
-**Phase 2 (Cut Path Generation):** Complete and confirmed working.
+**Phase 2 (Cut Path Generation):** Complete and user-confirmed.
 - `noise` package replaced with `opensimplex>=0.4.5`. API: `opensimplex.seed(n)`, `opensimplex.noise2(x, y)`.
 - All four cut types in `engine/cutter.py`: silhouette, tear, geometric, raw.
 - Post-confirmation iteration: silhouette wobble now seed-derived (amplitude/frequency vary widely per seed); loose tear uses independent rx/ry noise + spike perturbations; triangle is scalene/seeded; wedge apex placed at image corners for dramatic fan cuts.
 - `/test-cuts/{image_id}` endpoint + frontend test panel for visual QA.
 
-**Phase 3 (Morphing):** Complete and confirmed working.
+**Phase 3 (Morphing):** Complete and user-confirmed.
 - `engine/morpher.py`: compress_x, stretch_x, compress_y, stretch_y, rotate, flip_h, flip_v, diagonal_stretch, combined.
-- `shear` type repurposed: cuts an irregular polygon fragment from the stamp (jagged edges, tight-cropped) rather than a geometric lean — user-confirmed as the preferred behavior.
+- `shear` type repurposed: cuts an irregular polygon fragment from the stamp (jagged edges, tight-cropped) rather than a geometric lean — user-confirmed as the preferred behaviour.
 - Morph test row added to the cut test panel.
 
-**Phase 4 (Composition Engine):** Built (2026-04-08) — pipeline functional but NOT user-confirmed complete. Still in testing and iteration.
+**Phase 4 (Composition Engine):** Built and iterated. Not formally user-confirmed complete, but Phase 5 was built on top of it.
 - `engine/rules.py`: interprets all 7 sliders into a CompositionSpec (mode, stamp counts, role breakdown, cut weights, morph probability/intensity, rotation range, bleed, symmetry).
 - `engine/placer.py`: 5 placement modes — scenic, symmetric, radial, framed, experimental. Experimental blends two modes.
-- `engine/compositor.py`: full pipeline — rules → role assignment → cut_stamp → morph_stamp → place → alpha-composite → RGB PIL Image.
-- `server.py`: `_run_composition()` replaces the Phase 0/1 stub. Runs in `asyncio.to_thread`. Returns JPEG (Option A — single composited image, simpler than stamp packets).
-- `Pillow.alpha_composite` used as instance method (`canvas.alpha_composite(layer)`) not class method — `dest` kwarg not supported in this version.
+- `engine/compositor.py`: full pipeline — rules → role assignment → cut_stamp → morph_stamp → place → alpha-composite → RGB PIL Image. Stamp generation is parallelised with `ThreadPoolExecutor(max_workers=6)`; compositing is serial (z-order preserved).
+- `server.py`: `_run_composition()` replaces the Phase 0/1 stub. Runs in `asyncio.to_thread`. Returns JPEG base64 (Option A — single composited image).
+- Blend modes implemented per role: normal, multiply, screen, overlay, soft_light. Blend probability scales with morph_intensity slider.
+- Option B (stamp data packets) from the plan was not implemented. Option A is simpler and functional; Option B deferred to Phase 7 if needed for richer transitions.
+- `Pillow.alpha_composite` used as instance method (`canvas.alpha_composite(crop, dest=...)`) scoped to bbox only — avoids full-canvas layer allocation.
 
-**Known issues / priorities for next session:**
-- Generation speed: currently several seconds per composition. Need stamp caching and pre-generation to approach real-time.
-- Detail stamps (tiny fragments) need intentional clustering and more experimental variety to create compelling zoom targets. Currently scatter randomly.
+**Known issues carried forward:**
+- Generation speed: several seconds per composition. Pre-generation at 2× zoom (Phase 5) masks this for the zoom flow, but manual slider regeneration is still slow.
+- Detail stamps (tiny fragments) scatter randomly rather than clustering into compelling zoom targets. Still an open problem.
+
+---
+
+### 2026-04-08 — Phase 5 built
+
+**Phase 5 (Infinite Zoom):** Built. Not yet user-confirmed — in testing.
+
+**Frontend (index.html) — complete rewrite of the interaction layer:**
+- `state.zoom / panX / panY` replace the old single `state.zoom` scalar. Pan is tracked in screen-px offset from canvas centre.
+- Cursor-centred zoom math: the canvas pixel under the cursor stays fixed as zoom changes, using: `panX = cursorX - cW/2 - (cursorX - (cW/2 + panX)) * factor`.
+- Layer system: `currentLayer`, `nextLayer`, `layerStack[]` (max 3 deep). Each is a raw `Image` object.
+- `requestAnimationFrame` render loop replaces event-driven redraws. Single `rafLoop()` function handles transition interpolation and normal rendering in one place.
+- Two-threshold zoom system:
+  - **2×** — triggers pre-generation of next level (`triggerPreGen()`). Captures visible viewport as JPEG (`captureContextCrop()`) and samples average colour (`sampleTonalHint()`). Both sent to backend with the composition request.
+  - **3.5×** — triggers 600ms eased cross-dissolve transition in. If `nextLayer` is not yet ready, sets `state.awaitingTransition = true` and fires as soon as it arrives.
+  - **0.5×** — triggers reverse transition out, restoring previous layer from `layerStack[]`.
+- After a forward transition: zoom resets to 1×, pan resets to 0. This is spatially invisible because both compositions cover the same canvas area at their respective zoom levels (3.5× on old = 1× on new).
+- Easing: `ease(t) = t < 0.5 ? 2t² : 1 - (-2t+2)²/2` (ease-in-out quadratic).
+
+**Backend (server.py):**
+- `request_composition` WS handler now reads `context_crop` (base64 JPEG dataURL) and `tonal_hint` ({r,g,b}) from the message.
+- `_run_composition(sliders, seed, context_crop_b64, tonal_hint)` added these params.
+- If `context_crop_b64` is present: decodes to PIL, saves as `_ctx_{8hex}.jpg` in `cache/`, builds a synthetic meta dict (dominant_colors via `_dominant_colors()`, mean_color, no mask), appends to pool as an ephemeral entry. Cleaned up in `finally` block.
+- Context crop makes the new composition literally contain fragments of the viewport — collage-of-collage continuity.
+
+**Compositor + rules (engine/compositor.py, engine/rules.py):**
+- `compose()` accepts `tonal_hint: Optional[dict]`.
+- `spec["tonal_hint"]` set if provided; read in `_make_background()`.
+- Background bias by bg_type:
+  - `color`: uses hint directly (×0.60 darkened) instead of sampling a random pool image.
+  - `photo`: full-bleed photo kept, but a 25%-opacity tint overlay applied in hint colour.
+  - `none`: very dark tint (×0.18) applied instead of pure black canvas — preserves mood.
+
+**Deviations from Phase 5 plan:**
+
+| Plan said | What was built | Reason |
+|-----------|---------------|--------|
+| Transition should feel "physical, like tearing through paper — not a simple alpha crossfade" | 600ms eased cross-dissolve | Paper-tear requires per-stamp animation (Option B). Deferred to Phase 7. |
+| Composition fragment reuse was Phase 6 | Context crop (viewport → pool image) built in Phase 5 | Core to the fractal feel; pulling it forward was the right call. |
+| Single zoom threshold ("e.g. 2×") | Two thresholds: 2× pre-gen, 3.5× transition | Separating pre-gen from transition gives the server time to work before the user hits the wall. |
+| Zoom-out was Phase 7 (Polish) | Built in Phase 5 | Straightforward with the layer stack already in place; cost was low. |
+| Option B (stamp packets) for transitions | Option A (single JPEG) retained | Richer transitions deferred; JPEG layers are sufficient for cross-dissolve. |
+| tonal_hint not in plan | Added throughout | Needed for colour continuity across zoom levels. Propagated server → compositor → rules → _make_background(). |
+
+**Checkpoint:** git tag `phase4-checkpoint` pushed to GitHub (main branch). Covers Phase 4 final state before Phase 5 work began. Restore with `git checkout phase4-checkpoint`.
+
+---
+
+**Open / deferred work:**
+
+- Physical paper-tear transition (Phase 7)
+- Shape borrowing: silhouette of image A filled with content of image B (Phase 6, not started)
+- Stamp caching for faster re-generation (Phase 7)
+- Detail stamp clustering to create intentional zoom targets (open problem)
+- WebGL rendering upgrade if Canvas2D proves too slow at high density (Phase 7, if needed)
 
 *End of V2 plan. This document is the single source of truth for the project architecture. Update it as decisions are made during the build.*

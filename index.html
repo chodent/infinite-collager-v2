@@ -81,7 +81,7 @@
       background: #0d0d0d;
       position: relative;
     }
-    #canvas { display: block; cursor: crosshair; image-rendering: pixelated; }
+    #canvas { display: block; cursor: crosshair; }
     #canvas-placeholder {
       position: absolute;
       color: #333;
@@ -457,11 +457,10 @@
 </div><!-- /main -->
 
 <script>
-  // ── State ─────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────────
   const state = {
-    ws: null,
-    wsReady: false,
-    images: [],   // [{id, filename, status, meta}]
+    ws: null, wsReady: false,
+    images: [],
     sliders: {
       composition_mode:    0.20,
       background_presence: 0.00,
@@ -471,11 +470,32 @@
       symmetry:            0.75,
       fragment_scatter:    0.50,
     },
+
+    // View
     zoom: 1.0,
-    compositionImg: null,
+    panX: 0,   // screen-px offset of image centre from canvas centre
+    panY: 0,
+
+    // Layer system
+    currentLayer:       null,   // Image — what user is currently viewing
+    nextLayer:          null,   // Image — preloaded next level
+    layerStack:         [],     // [Image] — previous layers for zoom-out, max 3
+    _transitionPrevImg: null,   // Image used during reverse transition
+
+    // Transitions
+    transitioning:       false,
+    transitionDir:       'in',  // 'in' | 'out'
+    transitionProgress:  0,
+    transitionStartTs:   null,
+    TRANSITION_MS:       600,
+
+    // Pre-generation
+    generatingNext:      false,
+    awaitingTransition:  false,
+    compositionRole:     'current',  // 'current' | 'next'
   };
 
-  // ── Canvas ────────────────────────────────────────────────
+  // ── Canvas ────────────────────────────────────────────────────────────────────
   const canvas = document.getElementById('canvas');
   const ctx    = canvas.getContext('2d');
   const wrap   = document.getElementById('canvas-wrap');
@@ -483,43 +503,198 @@
   function resizeCanvas() {
     canvas.width  = wrap.clientWidth;
     canvas.height = wrap.clientHeight;
-    if (state.compositionImg) drawComposition();
   }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  function drawComposition() {
-    if (!state.compositionImg) return;
-    const img   = state.compositionImg;
-    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-    const dw    = img.width  * scale * state.zoom;
-    const dh    = img.height * scale * state.zoom;
-    const dx    = (canvas.width  - dw) / 2;
-    const dy    = (canvas.height - dh) / 2;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, dx, dy, dw, dh);
-    document.getElementById('canvas-placeholder').style.display = 'none';
+  // ── Render helpers ────────────────────────────────────────────────────────────
+  function baseScale(img) {
+    return Math.min(canvas.width / img.width, canvas.height / img.height);
   }
 
+  function drawImg(img, z, px, py, alpha) {
+    const bs = baseScale(img);
+    const dw = img.width  * bs * z;
+    const dh = img.height * bs * z;
+    const dx = canvas.width  / 2 + px - dw / 2;
+    const dy = canvas.height / 2 + py - dh / 2;
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.globalAlpha = 1;
+  }
+
+  function ease(t) {
+    return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!state.currentLayer) return;
+
+    if (state.transitioning) {
+      const t = ease(state.transitionProgress);
+      if (state.transitionDir === 'in') {
+        // Old layer frozen at 3.5× fades out; new layer at 1× fades in
+        drawImg(state.currentLayer, 3.5, 0, 0, 1 - t);
+        if (state.nextLayer) drawImg(state.nextLayer, 1.0, 0, 0, t);
+      } else {
+        // Current layer at 0.5× fades out; previous layer at 1× fades in
+        drawImg(state.currentLayer, 0.5, 0, 0, 1 - t);
+        if (state._transitionPrevImg) drawImg(state._transitionPrevImg, 1.0, 0, 0, t);
+      }
+    } else {
+      drawImg(state.currentLayer, state.zoom, state.panX, state.panY, 1.0);
+    }
+
+    // HUD
+    const zoomEl = document.getElementById('zoom-indicator');
+    let txt = `zoom: ${state.zoom.toFixed(2)}×`;
+    if (state.generatingNext && !state.nextLayer) txt += '  ·  loading next…';
+    else if (state.awaitingTransition)            txt += '  ·  dive ready';
+    zoomEl.textContent = txt;
+  }
+
+  // ── rAF loop ──────────────────────────────────────────────────────────────────
+  function rafLoop(ts) {
+    if (state.transitioning && state.transitionStartTs !== null) {
+      state.transitionProgress = Math.min(1,
+        (ts - state.transitionStartTs) / state.TRANSITION_MS);
+      if (state.transitionProgress >= 1) finishTransition();
+    }
+    render();
+    requestAnimationFrame(rafLoop);
+  }
+
+  // ── Transition logic ──────────────────────────────────────────────────────────
+  function beginTransition(dir) {
+    state.transitioning      = true;
+    state.transitionDir      = dir;
+    state.transitionProgress = 0;
+    state.transitionStartTs  = performance.now();
+    state.panX = 0;
+    state.panY = 0;
+  }
+
+  function finishTransition() {
+    state.transitioning      = false;
+    state.transitionProgress = 0;
+    state.transitionStartTs  = null;
+
+    if (state.transitionDir === 'in') {
+      if (state.layerStack.length >= 3) state.layerStack.shift();
+      state.layerStack.push(state.currentLayer);
+      state.currentLayer       = state.nextLayer;
+      state.nextLayer          = null;
+      state.zoom               = 1.0;
+      state.panX               = 0;
+      state.panY               = 0;
+      state.generatingNext     = false;
+      state.awaitingTransition = false;
+    } else {
+      state.currentLayer       = state._transitionPrevImg;
+      state._transitionPrevImg = null;
+      state.zoom               = 1.0;
+      state.panX               = 0;
+      state.panY               = 0;
+    }
+  }
+
+  // ── Wheel / zoom ──────────────────────────────────────────────────────────────
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    state.zoom = Math.max(0.1, Math.min(20, state.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
-    document.getElementById('zoom-indicator').textContent = `zoom: ${state.zoom.toFixed(2)}×`;
-    drawComposition();
+    if (state.transitioning || !state.currentLayer) return;
+
+    const factor  = e.deltaY > 0 ? 0.92 : 1.08;
+    const imgCX   = canvas.width  / 2 + state.panX;
+    const imgCY   = canvas.height / 2 + state.panY;
+    state.panX    = e.offsetX - canvas.width  / 2 - (e.offsetX - imgCX) * factor;
+    state.panY    = e.offsetY - canvas.height / 2 - (e.offsetY - imgCY) * factor;
+    state.zoom    = Math.max(0.05, state.zoom * factor);
+
+    // Pre-generate next level at zoom 2×
+    if (state.zoom >= 2.0 && !state.generatingNext && _readyCount() > 0) {
+      triggerPreGen();
+    }
+
+    // Clamp at 3.5× and trigger transition
+    if (state.zoom >= 3.5) {
+      state.zoom = 3.5;
+      state.panX = 0; state.panY = 0;
+      if (state.nextLayer && !state.awaitingTransition) {
+        beginTransition('in');
+      } else {
+        state.awaitingTransition = true;
+      }
+    }
+
+    // Zoom-out: reverse transition at 0.5×
+    if (state.zoom <= 0.5 && state.layerStack.length > 0) {
+      state.zoom               = 0.5;
+      state.panX               = 0; state.panY = 0;
+      state._transitionPrevImg = state.layerStack.pop();
+      beginTransition('out');
+    }
+
   }, { passive: false });
 
-  // ── WebSocket ─────────────────────────────────────────────
+  // ── Pre-generation ────────────────────────────────────────────────────────────
+  function triggerPreGen() {
+    state.generatingNext  = true;
+    state.compositionRole = 'next';
+    sendWS({
+      type:         'request_composition',
+      sliders:      state.sliders,
+      context_crop: captureContextCrop(),
+      tonal_hint:   sampleTonalHint(),
+    });
+  }
+
+  function captureContextCrop() {
+    if (!state.currentLayer) return null;
+    const off    = document.createElement('canvas');
+    off.width    = canvas.width;
+    off.height   = canvas.height;
+    const offCtx = off.getContext('2d');
+    offCtx.fillStyle = '#141210';
+    offCtx.fillRect(0, 0, off.width, off.height);
+    const img = state.currentLayer;
+    const bs  = baseScale(img);
+    offCtx.drawImage(img,
+      canvas.width  / 2 + state.panX - img.width  * bs * state.zoom / 2,
+      canvas.height / 2 + state.panY - img.height * bs * state.zoom / 2,
+      img.width  * bs * state.zoom,
+      img.height * bs * state.zoom
+    );
+    return off.toDataURL('image/jpeg', 0.82);
+  }
+
+  function sampleTonalHint() {
+    if (!state.currentLayer) return null;
+    const S      = 60;
+    const off    = document.createElement('canvas');
+    off.width    = S; off.height = S;
+    const offCtx = off.getContext('2d');
+    offCtx.drawImage(state.currentLayer, 0, 0, S, S);
+    const data = offCtx.getImageData(0, 0, S, S).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i+1]; b += data[i+2]; }
+    const n = data.length / 4;
+    return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+  }
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────────
   function connectWS() {
     const ws = new WebSocket(`ws://${location.host}/ws`);
     state.ws = ws;
-
-    ws.onopen  = () => { state.wsReady = true; setStatus('connected', 'ok'); };
-    ws.onclose = () => {
+    ws.onopen    = () => { state.wsReady = true; setStatus('connected', 'ok'); };
+    ws.onclose   = () => {
       state.wsReady = false;
       setStatus('disconnected — retrying…', 'err');
       setTimeout(connectWS, 2000);
     };
-    ws.onerror = () => setStatus('ws error', 'err');
+    ws.onerror   = () => setStatus('ws error', 'err');
     ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
   }
 
@@ -539,8 +714,7 @@
         break;
 
       case 'preprocess_progress':
-        _setImageStatus(msg.image_id, 'processing', msg.message,
-                        msg.step, msg.total);
+        _setImageStatus(msg.image_id, 'processing', msg.message, msg.step, msg.total);
         break;
 
       case 'preprocess_done': {
@@ -556,45 +730,68 @@
         _setImageStatus(msg.image_id, 'error', msg.error || 'error');
         break;
 
-      case 'composition':
-        loadCompositionImage(msg.image);
-        setStatus('ready', 'ok');
+      case 'composition': {
+        const role        = state.compositionRole;
+        state.compositionRole = 'current';
+        receiveComposition(msg.image, role);
         break;
+      }
 
       case 'pong':
         break;
     }
   }
 
+  function receiveComposition(dataUrl, role) {
+    const img = new Image();
+    img.onload = () => {
+      if (role === 'next') {
+        state.nextLayer = img;
+        if (state.awaitingTransition && !state.transitioning) {
+          state.awaitingTransition = false;
+          beginTransition('in');
+        } else {
+          setStatus('ready', 'ok');
+        }
+      } else {
+        state.currentLayer       = img;
+        state.zoom               = 1.0;
+        state.panX               = 0;
+        state.panY               = 0;
+        state.generatingNext     = false;
+        state.awaitingTransition = false;
+        state.nextLayer          = null;
+        document.getElementById('canvas-placeholder').style.display = 'none';
+        setStatus('ready', 'ok');
+      }
+    };
+    img.src = dataUrl;
+  }
+
   function _readyCount() {
     return state.images.filter(i => i.status === 'ready').length;
   }
 
-  // ── Per-image status helpers ──────────────────────────────
-
+  // ── Per-image status helpers ──────────────────────────────────────────────────
   function _setImageStatus(imageId, status, message, step, total, showTestBtn = false) {
     const el = document.getElementById(`item-${imageId}`);
     if (!el) return;
     el.className = `upload-item ${status}`;
-
     const dot  = el.querySelector('.status-dot');
     const text = el.querySelector('.status-text');
     if (dot)  { dot.className  = `status-dot  ${status}`; }
     if (text) { text.className = `status-text ${status}`; text.textContent = message; }
-
     if (step !== undefined && total !== undefined) {
       const fill = el.querySelector('.progress-bar-fill');
       if (fill) fill.style.width = `${Math.round((step / total) * 100)}%`;
     }
-
-    // Add test-cuts button when ready (if not already present)
     if (showTestBtn && !el.querySelector('.test-cuts-btn')) {
       const statusRow = el.querySelector('.upload-item-status');
       if (statusRow) {
         const btn = document.createElement('button');
-        btn.className = 'test-cuts-btn';
+        btn.className   = 'test-cuts-btn';
         btn.textContent = 'test cuts';
-        btn.onclick = () => openCutTest(imageId);
+        btn.onclick     = () => openCutTest(imageId);
         statusRow.appendChild(btn);
       }
     }
@@ -618,28 +815,23 @@
     });
   }
 
-  // ── Image list rendering ──────────────────────────────────
+  // ── Image list rendering ──────────────────────────────────────────────────────
   function renderImageList() {
     const container = document.getElementById('upload-items');
     const clearBtn  = document.getElementById('clear-btn');
-    document.getElementById('image-count').textContent =
-      `${state.images.length} / 10 images`;
-
-    // Build / update DOM items
-    // Remove items for images that no longer exist
+    document.getElementById('image-count').textContent = `${state.images.length} / 10 images`;
     const existingIds = new Set(state.images.map(i => i.id));
     Array.from(container.children).forEach(el => {
       if (!existingIds.has(el.dataset.imageId)) el.remove();
     });
-
     state.images.forEach(img => {
       let el = document.getElementById(`item-${img.id}`);
       if (!el) {
         el = document.createElement('div');
-        el.className = `upload-item ${img.status}`;
-        el.id = `item-${img.id}`;
+        el.className   = `upload-item ${img.status}`;
+        el.id          = `item-${img.id}`;
         el.dataset.imageId = img.id;
-        el.innerHTML = `
+        el.innerHTML   = `
           <div class="upload-item-name">${escHtml(img.filename)}</div>
           <div class="upload-item-status">
             <div class="status-dot ${img.status}"></div>
@@ -650,12 +842,8 @@
         `;
         container.appendChild(el);
       }
-      // If we already have meta (e.g. restored from server list), show swatches
-      if (img.status === 'ready' && img.meta) {
-        _updateSwatches(img.id, img.meta);
-      }
+      if (img.status === 'ready' && img.meta) _updateSwatches(img.id, img.meta);
     });
-
     clearBtn.style.display = state.images.length ? 'block' : 'none';
   }
 
@@ -663,18 +851,16 @@
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  // ── Upload ────────────────────────────────────────────────
+  // ── Upload ────────────────────────────────────────────────────────────────────
   document.getElementById('file-input').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
     const remaining = 10 - state.images.length;
     const toUpload  = files.slice(0, remaining);
     if (!toUpload.length) { setStatus('max 10 images', 'err'); return; }
-
     setStatus('uploading…', 'loading');
     const fd = new FormData();
     toUpload.forEach(f => fd.append('files', f));
-
     try {
       const res  = await fetch('/upload', { method: 'POST', body: fd });
       const data = await res.json();
@@ -692,46 +878,41 @@
     setStatus('cleared', 'ok');
   }
 
-  // ── Sliders ───────────────────────────────────────────────
+  // ── Sliders ───────────────────────────────────────────────────────────────────
   function onSlider(name, value) {
     state.sliders[name] = parseFloat(value);
     document.getElementById(`val-${name}`).textContent = parseFloat(value).toFixed(2);
     sendWS({ type: 'slider_change', sliders: state.sliders });
   }
 
-  // ── Composition ───────────────────────────────────────────
+  // ── Composition ───────────────────────────────────────────────────────────────
   function requestComposition() {
+    state.compositionRole = 'current';
     setStatus('generating…', 'loading');
     sendWS({ type: 'request_composition', sliders: state.sliders });
   }
 
-  function loadCompositionImage(dataUrl) {
-    const img  = new Image();
-    img.onload = () => { state.compositionImg = img; drawComposition(); };
-    img.src    = dataUrl;
-  }
-
-  // ── WS send ───────────────────────────────────────────────
+  // ── WS send ───────────────────────────────────────────────────────────────────
   function sendWS(obj) {
     if (state.ws && state.wsReady) state.ws.send(JSON.stringify(obj));
   }
 
-  // ── Status ────────────────────────────────────────────────
+  // ── Status ────────────────────────────────────────────────────────────────────
   function setStatus(text, cls = '') {
     const el = document.getElementById('status');
     el.textContent = text;
     el.className   = cls;
   }
 
-  // ── Cut test panel ────────────────────────────────────────
+  // ── Cut test panel ────────────────────────────────────────────────────────────
   const CUT_LABELS = {
-    silhouette:         'Silhouette',
-    tear:               'Loose Tear',
-    geometric_rect:     'Geometric — Rect',
-    geometric_strip:    'Geometric — Strip',
-    geometric_triangle: 'Geometric — Triangle',
-    geometric_wedge:    'Geometric — Wedge',
-    raw:                'Raw Crop',
+    silhouette:             'Silhouette',
+    tear:                   'Loose Tear',
+    geometric_rect:         'Geometric — Rect',
+    geometric_strip:        'Geometric — Strip',
+    geometric_triangle:     'Geometric — Triangle',
+    geometric_wedge:        'Geometric — Wedge',
+    raw:                    'Raw Crop',
     morph_compress_x:       'Morph — Compress X',
     morph_stretch_x:        'Morph — Stretch X',
     morph_rotate:           'Morph — Rotate',
@@ -739,8 +920,7 @@
     morph_shear:            'Morph — Shear',
     morph_combined:         'Morph — Combined',
   };
-
-  const CUT_SECTION_KEYS  = ['silhouette','tear','geometric_rect','geometric_strip','geometric_triangle','geometric_wedge','raw'];
+  const CUT_SECTION_KEYS   = ['silhouette','tear','geometric_rect','geometric_strip','geometric_triangle','geometric_wedge','raw'];
   const MORPH_SECTION_KEYS = ['morph_compress_x','morph_stretch_x','morph_rotate','morph_diagonal_stretch','morph_shear','morph_combined'];
 
   function _buildSection(title, keys, data, grid) {
@@ -748,23 +928,14 @@
     header.style.cssText = 'width:100%;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:0.1em;padding:8px 0 4px;border-top:1px solid #222;margin-top:4px';
     header.textContent = title;
     grid.appendChild(header);
-
     keys.forEach(key => {
       if (!(key in data)) return;
       const src  = data[key];
       const item = document.createElement('div');
       item.className = 'cut-test-item';
-      if (src) {
-        item.innerHTML = `
-          <img src="${src}" alt="${key}" />
-          <div class="cut-test-label">${CUT_LABELS[key] || key}</div>
-        `;
-      } else {
-        item.innerHTML = `
-          <div style="width:160px;height:120px;background:#1a1a1a;border:1px solid #2a2a2a;display:flex;align-items:center;justify-content:center;color:#444;font-size:10px">failed</div>
-          <div class="cut-test-label">${CUT_LABELS[key] || key}</div>
-        `;
-      }
+      item.innerHTML = src
+        ? `<img src="${src}" alt="${key}" /><div class="cut-test-label">${CUT_LABELS[key] || key}</div>`
+        : `<div style="width:160px;height:120px;background:#1a1a1a;border:1px solid #2a2a2a;display:flex;align-items:center;justify-content:center;color:#444;font-size:10px">failed</div><div class="cut-test-label">${CUT_LABELS[key] || key}</div>`;
       grid.appendChild(item);
     });
   }
@@ -774,22 +945,15 @@
     const backdrop = document.getElementById('cut-test-backdrop');
     const loading  = document.getElementById('cut-test-loading');
     const grid     = document.getElementById('cut-test-grid');
-
-    grid.innerHTML    = '';
-    loading.style.display = 'block';
-    panel.style.display   = 'block';
-    backdrop.style.display = 'block';
-
+    grid.innerHTML          = '';
+    loading.style.display   = 'block';
+    panel.style.display     = 'block';
+    backdrop.style.display  = 'block';
     try {
       const res  = await fetch(`/test-cuts/${imageId}`);
       const data = await res.json();
       loading.style.display = 'none';
-
-      if (data.error) {
-        grid.innerHTML = `<div style="color:#a55;font-size:12px">${data.error}</div>`;
-        return;
-      }
-
+      if (data.error) { grid.innerHTML = `<div style="color:#a55;font-size:12px">${data.error}</div>`; return; }
       _buildSection('Cuts', CUT_SECTION_KEYS, data, grid);
       _buildSection('Morphs (applied to silhouette)', MORPH_SECTION_KEYS, data, grid);
     } catch (err) {
@@ -803,8 +967,9 @@
     document.getElementById('cut-test-backdrop').style.display = 'none';
   }
 
-  // ── Init ──────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────────────
   connectWS();
+  requestAnimationFrame(rafLoop);
 </script>
 </body>
 </html>

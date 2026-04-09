@@ -125,7 +125,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "request_composition":
                 response = await asyncio.to_thread(
-                    _run_composition, data.get("sliders", {}), data.get("seed")
+                    _run_composition,
+                    data.get("sliders", {}),
+                    data.get("seed"),
+                    data.get("context_crop"),
+                    data.get("tonal_hint"),
                 )
                 await websocket.send_json(response)
 
@@ -281,42 +285,88 @@ def _generate_test_cuts(entry: dict) -> dict:
     return cuts
 
 
-# ── Phase 4: real composition ──────────────────────────────────────────────────
+# ── Phase 4 / 5: real composition ─────────────────────────────────────────────
 
-def _run_composition(sliders: dict, seed=None) -> dict:
+def _run_composition(sliders: dict, seed=None,
+                     context_crop_b64=None, tonal_hint=None) -> dict:
     """Synchronous: runs in asyncio.to_thread. Returns WS message dict."""
     from engine.compositor import compose
 
     ready = [img for img in uploaded_images if img["status"] == "ready"]
     if not ready:
-        # No ready images — return blank with message
-        img = Image.new("RGB", (800, 600), (20, 18, 16))
-        draw = ImageDraw.Draw(img)
+        img_out = Image.new("RGB", (800, 600), (20, 18, 16))
+        draw = ImageDraw.Draw(img_out)
         draw.text((20, 280), "No images ready — upload and wait for preprocessing",
                   fill=(100, 100, 100))
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=88)
-        data = base64.b64encode(buf.getvalue()).decode()
-        return {"type": "composition", "image": f"data:image/jpeg;base64,{data}"}
+        img_out.save(buf, format="JPEG", quality=88)
+        encoded = base64.b64encode(buf.getvalue()).decode()
+        return {"type": "composition", "image": f"data:image/jpeg;base64,{encoded}"}
 
     pool = [{"path": img["path"], "meta": img["meta"]} for img in ready]
 
+    # ── Context crop: add visible viewport as an extra pool image ──────────────
+    tmp_path = None
+    if context_crop_b64:
+        try:
+            raw = context_crop_b64
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            img_bytes = base64.b64decode(raw)
+            tmp_path  = CACHE_DIR / f"_ctx_{uuid.uuid4().hex[:8]}.jpg"
+            tmp_path.write_bytes(img_bytes)
+            pil_crop  = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            cw, ch    = pil_crop.size
+            crop_np   = np.array(pil_crop)
+            try:
+                from engine.preprocessor import _dominant_colors
+                dom_colors = _dominant_colors(crop_np, n_colors=3)
+                mean_c     = crop_np.mean(axis=(0, 1))
+                mean_dict  = {"r": int(mean_c[0]), "g": int(mean_c[1]), "b": int(mean_c[2])}
+            except Exception:
+                dom_colors = []
+                mean_dict  = {"r": 128, "g": 128, "b": 128}
+            tmp_meta = {
+                "hash":           "ctx_temp",
+                "width":          cw,
+                "height":         ch,
+                "dominant_colors": dom_colors,
+                "mean_color":     mean_dict,
+                "has_mask":       False,
+                "subject_bbox":   {"x": 0, "y": 0, "w": cw, "h": ch},
+                "mask_path":      None,
+                "work_path":      str(tmp_path),
+                "edges_path":     None,
+                "variance_path":  None,
+            }
+            pool.append({"path": str(tmp_path), "meta": tmp_meta})
+        except Exception as e:
+            print(f"[server] context_crop failed: {e}")
+            tmp_path = None
+
     try:
-        result_img = compose(pool, sliders, seed=seed, canvas_w=1200, canvas_h=900)
+        result_img = compose(pool, sliders, seed=seed, canvas_w=1200, canvas_h=900,
+                             tonal_hint=tonal_hint)
         buf = io.BytesIO()
         result_img.save(buf, format="JPEG", quality=88)
-        data = base64.b64encode(buf.getvalue()).decode()
-        return {"type": "composition", "image": f"data:image/jpeg;base64,{data}"}
+        encoded = base64.b64encode(buf.getvalue()).decode()
+        return {"type": "composition", "image": f"data:image/jpeg;base64,{encoded}"}
     except Exception as e:
         print(f"[compositor] compose failed: {e}")
         import traceback; traceback.print_exc()
-        img = Image.new("RGB", (800, 600), (30, 10, 10))
-        draw = ImageDraw.Draw(img)
+        img_out = Image.new("RGB", (800, 600), (30, 10, 10))
+        draw = ImageDraw.Draw(img_out)
         draw.text((20, 280), f"Composition error: {e}", fill=(200, 80, 80))
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=88)
-        data = base64.b64encode(buf.getvalue()).decode()
-        return {"type": "composition", "image": f"data:image/jpeg;base64,{data}"}
+        img_out.save(buf, format="JPEG", quality=88)
+        encoded = base64.b64encode(buf.getvalue()).decode()
+        return {"type": "composition", "image": f"data:image/jpeg;base64,{encoded}"}
+    finally:
+        if tmp_path:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
