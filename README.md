@@ -1,8 +1,8 @@
 # Infinite Collager V2
 
-A browser-based infinite zoom collage machine. Upload up to 10 photos — the system generates collage compositions using a rule-based engine inspired by physical cut-and-paste collage art. Scroll to zoom into any region, and a new composition generates at depth, infinitely.
+An infinite zoom collage machine. Upload photos — the system generates collage compositions using a rule-based engine. In the final version, scroll to zoom into any region, and a new composition generates at depth infinitely.
 
-This is the final release of V2. Further development continues in a new repository.
+This is the final release of V2. Further development will be in the v3 repository.
 
 ---
 
