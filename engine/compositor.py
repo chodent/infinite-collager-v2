@@ -20,70 +20,86 @@ from engine.cutter  import cut_stamp
 from engine.morpher import morph_stamp
 
 
+# ── Per-image cut preference parsing ──────────────────────────────────────────
+
+def _parse_disabled_cuts(disabled_keys: list) -> dict:
+    """Map a list of cut-key strings to typed sets for use in placer."""
+    dct: set = set()   # disabled cut types
+    dgs: set = set()   # disabled geometric shapes
+    dmt: set = set()   # disabled morph types
+    for key in disabled_keys:
+        if key in ("silhouette", "tear", "raw"):
+            dct.add(key)
+        elif key == "geometric_rect":
+            dgs.add("rect")
+        elif key == "geometric_strip":
+            dgs.update({"strip_h", "strip_v"})
+        elif key == "geometric_triangle":
+            dgs.add("triangle")
+        elif key == "geometric_wedge":
+            dgs.add("wedge")
+        elif key.startswith("morph_"):
+            dmt.add(key[6:])
+    if {"rect", "triangle", "wedge"}.issubset(dgs):
+        dct.add("geometric")
+    return {"dct": dct, "dgs": dgs, "dmt": dmt}
+
+
 # ── Public API — defined after helpers below ───────────────────────────────────
 
 
 # ── Role list builder ──────────────────────────────────────────────────────────
 
-def _build_role_list(image_pool: list, spec: dict, rng: random.Random) -> list:
+def _build_role_list(image_pool: list, spec: dict, rng: random.Random,
+                     image_weights: Optional[list] = None) -> list:
     """
     Create one entry per stamp. Each entry carries role, source_idx,
     and (pre-set) cut_type/cut_params if role dictates it.
+    image_weights: optional list of floats (parallel to image_pool) for weighted pick.
     """
     role_list = []
     n_images  = len(image_pool)
     rc        = spec["role_counts"]
 
+    indices = list(range(n_images))
+    if image_weights and len(image_weights) == n_images:
+        def pick_idx():
+            return rng.choices(indices, weights=image_weights, k=1)[0]
+    else:
+        def pick_idx():
+            return rng.randint(0, n_images - 1)
+
+    def make_entry(role, cut_type, cut_params, morph_type):
+        idx = pick_idx()
+        return {
+            "role":              role,
+            "source_idx":        idx,
+            "cut_type":          cut_type,
+            "cut_params":        cut_params,
+            "morph_type":        morph_type,
+            "_parsed_disabled":  image_pool[idx].get("_parsed_disabled", {}),
+        }
+
     # Background (optional)
     if spec["bg_type"] == "photo":
-        role_list.append({
-            "role":       "background",
-            "source_idx": rng.randint(0, n_images - 1),
-            "cut_type":   "raw",
-            "cut_params": {},
-            "morph_type": None,
-        })
+        role_list.append(make_entry("background", "raw", {}, None))
 
     # Dominant
     for _ in range(rc["dominant"]):
-        role_list.append({
-            "role":       "dominant",
-            "source_idx": rng.randint(0, n_images - 1),
-            "cut_type":   None,
-            "cut_params": {},
-            "morph_type": None,
-        })
+        role_list.append(make_entry("dominant", None, {}, None))
 
     # Supporting
     for _ in range(rc["supporting"]):
-        role_list.append({
-            "role":       "supporting",
-            "source_idx": rng.randint(0, n_images - 1),
-            "cut_type":   None,
-            "cut_params": {},
-            "morph_type": None,
-        })
+        role_list.append(make_entry("supporting", None, {}, None))
 
     # Detail
     for _ in range(rc["detail"]):
-        role_list.append({
-            "role":       "detail",
-            "source_idx": rng.randint(0, n_images - 1),
-            "cut_type":   None,
-            "cut_params": {},
-            "morph_type": None,
-        })
+        role_list.append(make_entry("detail", None, {}, None))
 
     # Strips
     for i in range(rc["strip"]):
         shape = "strip_h" if i % 2 == 0 else "strip_v"
-        role_list.append({
-            "role":       "strip",
-            "source_idx": rng.randint(0, n_images - 1),
-            "cut_type":   "geometric",
-            "cut_params": {"shape": shape},
-            "morph_type": None,
-        })
+        role_list.append(make_entry("strip", "geometric", {"shape": shape}, None))
 
     return role_list
 
@@ -218,12 +234,13 @@ def _composite_stamp(
 # ── Internal compose (patched to pass entries) ─────────────────────────────────
 
 def compose(
-    image_pool: List[dict],
-    sliders:    dict,
-    seed:       Optional[int] = None,
-    canvas_w:   int = 1200,
-    canvas_h:   int = 900,
-    tonal_hint: Optional[dict] = None,
+    image_pool:     List[dict],
+    sliders:        dict,
+    seed:           Optional[int] = None,
+    canvas_w:       int = 1200,
+    canvas_h:       int = 900,
+    tonal_hint:     Optional[dict] = None,
+    image_weights:  Optional[list] = None,
 ) -> Image.Image:
     if not image_pool:
         return _blank_canvas(canvas_w, canvas_h)
@@ -259,9 +276,13 @@ def compose(
                     "w": int(sb["w"] * sx), "h": int(sb["h"] * sy),
                 }
             # mask_path still points to full-res mask — scale handled in _load_mask
-        loaded_pool.append({"path": entry["path"], "meta": meta, "img": img})
+        disabled = entry.get("disabled_cuts") or []
+        loaded_pool.append({
+            "path": entry["path"], "meta": meta, "img": img,
+            "_parsed_disabled": _parse_disabled_cuts(disabled) if disabled else {},
+        })
 
-    role_list = _build_role_list(loaded_pool, spec, rng)
+    role_list = _build_role_list(loaded_pool, spec, rng, image_weights=image_weights)
     placed    = placer.place_stamps(role_list, spec, canvas_w, canvas_h, seed + 1)
 
     canvas         = _make_background(loaded_pool, spec, canvas_w, canvas_h, rng)

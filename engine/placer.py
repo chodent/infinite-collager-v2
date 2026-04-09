@@ -69,35 +69,56 @@ def _bleed(v: int, dim: int, size: int, allow: bool, rng: random.Random) -> int:
     return v
 
 def _pick_cut(role: str, spec: dict, rng: random.Random) -> tuple:
-    """Pick a cut type for this role using cut_weights."""
-    weights = spec["cut_weights"].get(role, spec["cut_weights"]["detail"])
-    types   = list(weights.keys())
-    probs   = list(weights.values())
-    cut     = rng.choices(types, weights=probs, k=1)[0]
+    """Pick a cut type for this role using cut_weights, respecting disabled cuts."""
+    weights  = dict(spec["cut_weights"].get(role, spec["cut_weights"]["detail"]))
+    disabled = spec.get("disabled_cut_types", set())
+    for d in disabled:
+        weights.pop(d, None)
+    if not weights:
+        weights = {"raw": 1.0}   # last-resort fallback
+    types  = list(weights.keys())
+    probs  = list(weights.values())
+    cut    = rng.choices(types, weights=probs, k=1)[0]
 
     cut_params = {}
     if cut == "geometric":
+        disabled_shapes = spec.get("disabled_geo_shapes", set())
         if role == "strip":
-            cut_params["shape"] = rng.choice(["strip_h", "strip_v"])
+            available = [s for s in ["strip_h", "strip_v"] if s not in disabled_shapes]
+            cut_params["shape"] = rng.choice(available or ["strip_h"])
         else:
-            cut_params["shape"] = rng.choice(["rect", "triangle", "wedge"])
+            available = [s for s in ["rect", "triangle", "wedge"] if s not in disabled_shapes]
+            cut_params["shape"] = rng.choice(available or ["rect"])
 
     return cut, cut_params
 
 def _pick_morph(spec: dict, rng: random.Random) -> str | None:
     if rng.random() < spec["morph_prob"]:
-        return rng.choice([
+        disabled  = spec.get("disabled_morph_types", set())
+        available = [m for m in [
             "compress_x", "stretch_x", "compress_y", "stretch_y",
             "rotate", "diagonal_stretch", "combined",
-        ])
+        ] if m not in disabled]
+        if not available:
+            return None
+        return rng.choice(available)
     return None
 
 def _assign_cut_morph(entry: dict, role: str, spec: dict, rng: random.Random) -> dict:
-    """Fill in cut_type/cut_params/morph_type if not already set."""
+    """Fill in cut_type/cut_params/morph_type if not already set.
+    Merges per-image disabled cuts (from entry['_parsed_disabled']) with global spec."""
+    parsed = entry.get("_parsed_disabled") or {}
+    if parsed:
+        local = dict(spec)
+        local["disabled_cut_types"]  = spec.get("disabled_cut_types",  set()) | parsed.get("dct", set())
+        local["disabled_geo_shapes"] = spec.get("disabled_geo_shapes", set()) | parsed.get("dgs", set())
+        local["disabled_morph_types"]= spec.get("disabled_morph_types",set()) | parsed.get("dmt", set())
+    else:
+        local = spec
     if not entry.get("cut_type"):
-        entry["cut_type"], entry["cut_params"] = _pick_cut(role, spec, rng)
+        entry["cut_type"], entry["cut_params"] = _pick_cut(role, local, rng)
     if "morph_type" not in entry:
-        entry["morph_type"] = _pick_morph(spec, rng)
+        entry["morph_type"] = _pick_morph(local, rng)
     return entry
 
 def _detail_size(cw: int, ch: int, rng: random.Random) -> Tuple[int, int]:

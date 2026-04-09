@@ -360,6 +360,10 @@ def _load_mask(meta: dict, width: int, height: int) -> np.ndarray:
         if m is not None:
             # Threshold to clean binary mask
             _, m = cv2.threshold(m, 30, 255, cv2.THRESH_BINARY)
+            # Resize to match the image being processed (work copy may be smaller)
+            mh, mw = m.shape[:2]
+            if (mw, mh) != (width, height):
+                m = cv2.resize(m, (width, height), interpolation=cv2.INTER_NEAREST)
             return m
     # Fallback: filled ellipse covering the central 70% of the image
     mask = np.zeros((height, width), dtype=np.uint8)

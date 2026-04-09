@@ -5,8 +5,11 @@ Infinite zoom collage machine. Python backend (FastAPI + image processing) serve
 a single-file frontend (index.html) on port 6969. User uploads up to 10 photos,
 system generates collage compositions using a rule engine. Scroll to zoom infinitely.
 
+**V2 is complete and final.** Phases 0–5.5 are all shipped and user-confirmed.
+Future development (Phases 6–7 and beyond) continues in a new repository.
+
 ## Stack
-- Frontend: index.html (Canvas2D/WebGL, sliders, WebSocket)
+- Frontend: index.html (Canvas2D, sliders, WebSocket)
 - Backend: server.py + engine/ module (FastAPI, OpenCV, rembg, Pillow)
 - No npm. No build step. No frameworks.
 
@@ -35,50 +38,66 @@ rule system, and build phases.
 - index.html      — Entire frontend
 - server.py       — Backend server
 
-## Current Phase
-Phases 0–4 complete (Phase 4 built and iterated but not formally user-confirmed).
-Phase 5 (Infinite Zoom) built 2026-04-08. Not yet user-confirmed — currently in testing.
-Do not advance to Phase 6 until Phase 5 is user-confirmed.
+## Build Status — All Phases Complete
 
-Phase 5 delivered:
-- index.html    — full layer system (currentLayer/nextLayer/layerStack[]), cursor-centred
-                  zoom + pan, requestAnimationFrame render loop, pre-gen at 2×,
-                  transition trigger at 3.5×, 600ms eased cross-dissolve (in + out),
-                  zoom-out reverse transition below 0.5×, context_crop + tonal_hint capture
-- server.py     — request_composition accepts context_crop (base64 JPEG) and tonal_hint;
-                  crop decoded, preprocessed, added to pool as ephemeral entry, cleaned up
-- engine/compositor.py — compose() accepts tonal_hint; passed to _make_background()
-                         which strongly biases background colour toward hint
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Foundation — server, canvas, upload, WebSocket, sliders | Done |
+| 1 | Preprocessing — subject masks, colors, edge/variance maps | Done |
+| 2 | Cut path generation — silhouette, tear, geometric, raw | Done |
+| 3 | Morphing — stretch, compress, rotate, shear, diagonal | Done |
+| 4 | Composition engine — role assignment, layout, blend modes | Done |
+| 5 | Infinite zoom — scroll zoom, layer transitions, tonal continuity | Done |
+| 5.5 | QOL — per-image delete, cut prefs, drag ordering, tooltips | Done |
+| 6 | Shape borrowing & collage-of-collage | Future repo |
+| 7 | Polish & performance | Future repo |
 
-## Known Issues / Next Priorities
-- Generation is slow (several seconds) — all cutting/morphing is synchronous per-stamp.
-  The pre-generation at 2× buys time, but slider-triggered regeneration is still slow.
-  Target: stamp cache to approach real-time slider response.
-- Detail/tiny stamps need more intentional clustering and variety to create compelling
-  zoom targets. Currently they scatter randomly — should group and feel worth exploring.
+## Known Issues (carried forward to new repo)
+- Generation is slow (several seconds per composition). Pre-generation at 2× buys time
+  but slider-triggered regeneration is still noticeably slow. Target: stamp caching.
+- Detail/tiny stamps scatter randomly — no intentional clustering. Should group to create
+  compelling zoom targets.
 - Transition is a cross-dissolve. Plan called for something more physical ("like tearing
-  through paper"). Physical transition deferred to Phase 7 polish.
+  through paper"). Deferred to Phase 7.
+- Infinite zoom is functional but the aesthetic continuity between layers is loose.
+  Option B (stamp packet transitions) would make it feel truly fractal.
 
-## Known Deviations from Plan
+## Deviations from Plan
+
+### Dependencies
 - `noise` package (Perlin) is incompatible with Python 3.14 — replaced with `opensimplex>=0.4.5`
   throughout. Use `opensimplex.seed(n)` + `opensimplex.noise2(x, y)`.
-- `rembg` requires `rembg[cpu]` to pull in onnxruntime — requirements.txt already specifies
-  `rembg[cpu]`. If onnxruntime still fails (e.g. no Python 3.14 wheel), preprocessor falls
-  back to OpenCV GrabCut automatically.
-- GrabCut fallback mask is rougher than rembg — silhouette cuts will be less precise until
-  rembg is confirmed working.
+- `rembg` requires `rembg[cpu]` to pull in onnxruntime — requirements.txt specifies this.
+  If onnxruntime fails (no wheel for Python version), preprocessor falls back to OpenCV
+  GrabCut automatically. GrabCut masks are rougher; silhouette cuts are less precise.
+
+### Cut / Morph behaviour
 - morpher.py `shear` type was repurposed: instead of a geometric lean, it cuts an irregular
-  polygon fragment from the stamp (jagged edges, tight-cropped). This is intentional.
-- Cut quality was iterated post-Phase 2: silhouette wobble is now seed-derived
-  (amplitude/frequency vary), loose tear uses independent rx/ry noise + spikes,
-  triangle is scalene seeded, wedge apex placed at image corners.
+  polygon fragment from the stamp (jagged edges, tight-cropped). Intentional deviation.
+- Cut quality was iterated post-Phase 2: silhouette wobble is seed-derived (amplitude and
+  frequency vary per seed), loose tear uses independent rx/ry noise + spikes, triangle is
+  scalene seeded, wedge apex placed at image corners.
+- `_load_mask` in cutter.py resizes the cached mask to match the work image dimensions —
+  necessary because the mask is stored at original resolution but stamps are generated from
+  a 900px-max working copy.
+
+### Phase scope changes
 - Option A (single JPEG per layer) retained throughout Phase 5. Plan recommended switching
-  to Option B (stamp packets) for transitions; this is deferred to Phase 7.
-- Context crop (visible viewport as pool image) was originally Phase 6 scope — pulled
-  forward into Phase 5 as it is core to the fractal continuity effect.
+  to Option B (stamp packets) for transitions; deferred to Phase 7 / new repo.
+- Context crop (visible viewport fed back as a pool image) was originally Phase 6 scope —
+  pulled forward into Phase 5 as it is core to the fractal continuity effect.
 - Zoom thresholds: pre-gen triggers at 2×, transition fires at 3.5×, zoom-out at 0.5×.
   Plan specified only a single threshold; these values are implementation decisions.
-- Zoom-out layer restoration was Phase 7 scope in the plan — built in Phase 5 (below 0.5×
-  triggers reverse cross-dissolve back to the previous layer from layerStack[]).
-- tonal_hint system (sample avg colour from visible crop → bias new composition's background)
-  not in the original plan. Added in Phase 5 to create colour continuity across zoom levels.
+- Zoom-out layer restoration was Phase 7 scope — built in Phase 5 (below 0.5× triggers
+  reverse cross-dissolve back to the previous layer from layerStack[]).
+- tonal_hint system (sample average colour from visible crop → bias new composition's
+  background) not in the original plan. Added in Phase 5 for colour continuity.
+
+### Phase 5.5 additions (not in original plan)
+- Per-image delete button (DELETE /images/{id} endpoint)
+- Per-image cut type preferences stored as disabled-key sets in localStorage, propagated
+  through server pool → compositor → placer per-stamp assignment
+- Draggable image ordering with optional priority weighting (top ~3×, bottom ~0.4×),
+  off by default
+- Slider hover tooltips via CSS [data-tooltip]::after pseudo-element
+- Cut test panel redesigned: per-tile checkboxes replace global filter bar

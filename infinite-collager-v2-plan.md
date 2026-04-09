@@ -2,6 +2,10 @@
 
 *Reference document for building the Infinite Collager V2 in Claude Code. This document contains the full architecture, rule system, technical stack, file structure, and phased build plan.*
 
+> **V2 status as of 2026-04-09:** Phases 0–5.5 are complete and shipped. V2 is final.
+> Phases 6–7 and all remaining items carry forward into a new repository.
+> This document is preserved as the architectural reference for that continuation.
+
 ---
 
 ## 1. What This Project Is

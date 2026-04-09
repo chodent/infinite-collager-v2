@@ -184,14 +184,42 @@
     }
     .upload-item:last-child { border-bottom: none; }
 
+    .upload-item-row1 {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 3px;
+    }
+    .drag-handle {
+      color: #333;
+      cursor: grab;
+      flex-shrink: 0;
+      user-select: none;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .drag-handle:hover { color: #666; }
     .upload-item-name {
       font-size: 11px;
       color: #666;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      margin-bottom: 3px;
+      flex: 1;
+      min-width: 0;
     }
+    .delete-img-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: #3a3a3a;
+      cursor: pointer;
+      font-size: 10px;
+      padding: 1px 3px;
+      font-family: monospace;
+      line-height: 1;
+    }
+    .delete-img-btn:hover { color: #a55; }
 
     .upload-item-status {
       font-size: 10px;
@@ -313,6 +341,7 @@
     }
     .cut-test-item {
       text-align: center;
+      position: relative;
     }
     .cut-test-item img {
       display: block;
@@ -321,6 +350,21 @@
       background: repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 0 0 / 10px 10px;
       border: 1px solid #2a2a2a;
     }
+    .cut-tile-toggle {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+      accent-color: #557;
+      z-index: 10;
+    }
+    .cut-tile-disabled {
+      opacity: 0.3;
+      filter: grayscale(0.7);
+    }
+    #cut-test-filter:empty { display: none; }
     .cut-test-label {
       font-size: 10px;
       color: #555;
@@ -340,6 +384,99 @@
       background: rgba(0,0,0,0.6);
       z-index: 99;
     }
+
+    /* ── Drag states ────────────────────────────────────────── */
+    .upload-item.dragging  { opacity: 0.35; }
+    .upload-item.drag-over { border-top: 2px solid #445566; }
+
+    /* ── Priority badge ─────────────────────────────────────── */
+    .priority-badge {
+      font-size: 9px;
+      margin-left: 4px;
+      flex-shrink: 0;
+    }
+
+    /* ── Priority toggle ────────────────────────────────────── */
+    .priority-toggle-row {
+      padding: 5px 14px 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      border-top: 1px solid #1e1e1e;
+    }
+    .priority-toggle-row input[type="checkbox"] {
+      width: auto; height: auto;
+      -webkit-appearance: checkbox;
+      appearance: checkbox;
+      cursor: pointer;
+      accent-color: #557;
+    }
+    .priority-toggle-row label { cursor: pointer; color: #555; }
+
+    /* ── Cut filter bar ─────────────────────────────────────── */
+    #cut-test-filter {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #222;
+    }
+    .cut-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px 8px;
+      margin-bottom: 4px;
+    }
+    .cut-filter-section-label {
+      font-size: 9px;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      width: 38px;
+      flex-shrink: 0;
+    }
+    .cut-filter-item {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      color: #666;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cut-filter-item input[type="checkbox"] {
+      width: auto; height: auto;
+      -webkit-appearance: checkbox;
+      appearance: checkbox;
+      cursor: pointer;
+      accent-color: #557;
+    }
+    .cut-filter-item:hover { color: #aaa; }
+
+    /* ── Slider tooltips ────────────────────────────────────── */
+    .slider-name {
+      position: relative;
+      cursor: help;
+    }
+    .slider-name[data-tooltip]::after {
+      content: attr(data-tooltip);
+      display: none;
+      position: absolute;
+      left: 0;
+      top: calc(100% + 5px);
+      background: #1e1e1e;
+      border: 1px solid #3a3a3a;
+      color: #999;
+      font-size: 10px;
+      line-height: 1.5;
+      padding: 5px 8px;
+      width: 200px;
+      z-index: 300;
+      white-space: normal;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.6);
+      font-family: monospace;
+    }
+    .slider-name[data-tooltip]:hover::after { display: block; }
   </style>
 </head>
 <body>
@@ -358,6 +495,7 @@
 <div id="cut-test-backdrop" onclick="closeCutTest()"></div>
 <div id="cut-test-panel">
   <h2>Cut Test <span id="cut-test-close" onclick="closeCutTest()">✕</span></h2>
+  <div id="cut-test-filter"></div>
   <div id="cut-test-loading">Generating cuts…</div>
   <div id="cut-test-grid"></div>
 </div>
@@ -378,7 +516,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Composition Mode</span>
+        <span class="slider-name" data-tooltip="How structured vs. experimental the layout feels. Low = clear scenic hierarchy, high = chaotic experimental layering.">Composition Mode</span>
         <span class="slider-value" id="val-composition_mode">0.20</span>
       </div>
       <input type="range" id="sl-composition_mode" min="0" max="1" step="0.01" value="0.20"
@@ -388,7 +526,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Background Presence</span>
+        <span class="slider-name" data-tooltip="Controls what fills the canvas behind stamps. Low = full-bleed photo, mid = solid color derived from your images, high = no background at all.">Background Presence</span>
         <span class="slider-value" id="val-background_presence">0.00</span>
       </div>
       <input type="range" id="sl-background_presence" min="0" max="1" step="0.01" value="0.00"
@@ -398,7 +536,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Cut Style Bias</span>
+        <span class="slider-name" data-tooltip="How stamps are shaped when cut from source photos. Low = organic silhouettes and torn edges, high = hard-edged rectangles, triangles, and strips.">Cut Style Bias</span>
         <span class="slider-value" id="val-cut_style_bias">0.30</span>
       </div>
       <input type="range" id="sl-cut_style_bias" min="0" max="1" step="0.01" value="0.30"
@@ -408,7 +546,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Morph Intensity</span>
+        <span class="slider-name" data-tooltip="How aggressively stamps are distorted after cutting. Low = faithful to source shape, high = stretched, compressed, rotated, and warped.">Morph Intensity</span>
         <span class="slider-value" id="val-morph_intensity">0.25</span>
       </div>
       <input type="range" id="sl-morph_intensity" min="0" max="1" step="0.01" value="0.25"
@@ -418,7 +556,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Density</span>
+        <span class="slider-name" data-tooltip="How many stamps are placed in the composition. Low = 5 sparse elements with breathing room, high = 32 densely packed overlapping fragments.">Density</span>
         <span class="slider-value" id="val-density">0.90</span>
       </div>
       <input type="range" id="sl-density" min="0" max="1" step="0.01" value="0.90"
@@ -428,7 +566,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Symmetry</span>
+        <span class="slider-name" data-tooltip="Whether stamps are mirrored across the canvas centre. Below midpoint = natural asymmetric placement, above = stamps reflected for a balanced look.">Symmetry</span>
         <span class="slider-value" id="val-symmetry">0.75</span>
       </div>
       <input type="range" id="sl-symmetry" min="0" max="1" step="0.01" value="0.75"
@@ -438,7 +576,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span class="slider-name">Fragment Scatter</span>
+        <span class="slider-name" data-tooltip="Controls rotation range and placement randomness. Low = stamps aligned and orderly (±3°), high = wild off-axis rotations and chaotic scatter (±180°).">Fragment Scatter</span>
         <span class="slider-value" id="val-fragment_scatter">0.50</span>
       </div>
       <input type="range" id="sl-fragment_scatter" min="0" max="1" step="0.01" value="0.50"
@@ -449,6 +587,10 @@
     <!-- Upload list -->
     <div id="upload-section">
       <div id="upload-list-header">Uploaded Images</div>
+      <div class="priority-toggle-row">
+        <input type="checkbox" id="weight-toggle" onchange="toggleWeights(this.checked)" />
+        <label for="weight-toggle" title="When on, images higher in the list are picked more often for stamp slots (top ≈ 3× chance, bottom ≈ 0.4×). Drag images to reorder priority.">image priority weighting</label>
+      </div>
       <div id="upload-items"></div>
       <button id="clear-btn" onclick="clearImages()">Clear All Images</button>
     </div>
@@ -457,6 +599,53 @@
 </div><!-- /main -->
 
 <script>
+  // ── Constants ─────────────────────────────────────────────────────────────────
+  const CUT_LABELS = {
+    silhouette:             'Silhouette',
+    tear:                   'Loose Tear',
+    geometric_rect:         'Geometric — Rect',
+    geometric_strip:        'Geometric — Strip',
+    geometric_triangle:     'Geometric — Triangle',
+    geometric_wedge:        'Geometric — Wedge',
+    raw:                    'Raw Crop',
+    morph_compress_x:       'Morph — Compress X',
+    morph_stretch_x:        'Morph — Stretch X',
+    morph_rotate:           'Morph — Rotate',
+    morph_diagonal_stretch: 'Morph — Diagonal Stretch',
+    morph_shear:            'Morph — Shear',
+    morph_combined:         'Morph — Combined',
+  };
+  const CUT_SECTION_KEYS   = ['silhouette','tear','geometric_rect','geometric_strip','geometric_triangle','geometric_wedge','raw'];
+  const MORPH_SECTION_KEYS = ['morph_compress_x','morph_stretch_x','morph_rotate','morph_diagonal_stretch','morph_shear','morph_combined'];
+  const ALL_CUT_KEYS       = [...CUT_SECTION_KEYS, ...MORPH_SECTION_KEYS];
+
+  // ── localStorage helpers ──────────────────────────────────────────────────────
+  // Stores DISABLED keys per image. Anything not in the disabled set is enabled.
+  // New cut types therefore always default to enabled without migration.
+  function _loadCutPrefs() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ic2_cutPrefs') || '{}');
+      if (typeof saved === 'object' && saved !== null) {
+        const prefs = {};
+        Object.entries(saved).forEach(([id, arr]) => {
+          if (Array.isArray(arr)) {
+            const valid = arr.filter(k => ALL_CUT_KEYS.includes(k));
+            if (valid.length) prefs[id] = new Set(valid);
+          }
+        });
+        return prefs;
+      }
+    } catch {}
+    return {};
+  }
+  function _saveCutPrefs() {
+    const out = {};
+    Object.entries(state.cutPrefs).forEach(([id, disabled]) => {
+      if (disabled && disabled.size > 0) out[id] = [...disabled];
+    });
+    localStorage.setItem('ic2_cutPrefs', JSON.stringify(out));
+  }
+
   // ── State ─────────────────────────────────────────────────────────────────────
   const state = {
     ws: null, wsReady: false,
@@ -473,18 +662,18 @@
 
     // View
     zoom: 1.0,
-    panX: 0,   // screen-px offset of image centre from canvas centre
+    panX: 0,
     panY: 0,
 
     // Layer system
-    currentLayer:       null,   // Image — what user is currently viewing
-    nextLayer:          null,   // Image — preloaded next level
-    layerStack:         [],     // [Image] — previous layers for zoom-out, max 3
-    _transitionPrevImg: null,   // Image used during reverse transition
+    currentLayer:       null,
+    nextLayer:          null,
+    layerStack:         [],
+    _transitionPrevImg: null,
 
     // Transitions
     transitioning:       false,
-    transitionDir:       'in',  // 'in' | 'out'
+    transitionDir:       'in',
     transitionProgress:  0,
     transitionStartTs:   null,
     TRANSITION_MS:       600,
@@ -492,7 +681,19 @@
     // Pre-generation
     generatingNext:      false,
     awaitingTransition:  false,
-    compositionRole:     'current',  // 'current' | 'next'
+    compositionRole:     'current',
+
+    // Phase 5.5 — cut preferences per image (imageId → Set of DISABLED cut keys)
+    cutPrefs:        _loadCutPrefs(),
+
+    // Phase 5.5 — image priority
+    imageOrder:      [],
+    useImageWeights: false,
+    _draggingId:     null,
+
+    // Phase 5.5 — cut test cache
+    _lastCutData:    null,
+    _cutTestImageId: null,
   };
 
   // ── Canvas ────────────────────────────────────────────────────────────────────
@@ -639,6 +840,19 @@
 
   }, { passive: false });
 
+  // ── Composition extras ────────────────────────────────────────────────────────
+  function _getCompositionExtras() {
+    const image_cut_prefs = {};
+    Object.entries(state.cutPrefs).forEach(([id, disabled]) => {
+      if (disabled && disabled.size > 0) image_cut_prefs[id] = [...disabled];
+    });
+    return {
+      image_cut_prefs,
+      image_order:  state.imageOrder,
+      use_weights:  state.useImageWeights,
+    };
+  }
+
   // ── Pre-generation ────────────────────────────────────────────────────────────
   function triggerPreGen() {
     state.generatingNext  = true;
@@ -648,6 +862,7 @@
       sliders:      state.sliders,
       context_crop: captureContextCrop(),
       tonal_hint:   sampleTonalHint(),
+      ..._getCompositionExtras(),
     });
   }
 
@@ -706,6 +921,7 @@
 
       case 'images_updated':
         state.images = msg.images || [];
+        syncImageOrder(state.images);
         renderImageList();
         break;
 
@@ -795,6 +1011,37 @@
         statusRow.appendChild(btn);
       }
     }
+    _updatePriorityBadge(imageId);
+  }
+
+  function _updatePriorityBadge(imageId) {
+    const el   = document.getElementById(`item-${imageId}`);
+    if (!el) return;
+    const rank  = state.imageOrder.indexOf(imageId);
+    const total = state.imageOrder.length;
+    let badge   = el.querySelector('.priority-badge');
+    if (state.useImageWeights && rank >= 0 && total > 1) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'priority-badge';
+        const statusRow = el.querySelector('.upload-item-status');
+        if (statusRow) statusRow.appendChild(badge);
+      }
+      badge.textContent = `#${rank + 1}`;
+      const frac = rank / (total - 1);
+      badge.style.color = frac < 0.35 ? '#7a7' : frac > 0.65 ? '#555' : '#777';
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+
+  // ── Image order sync ──────────────────────────────────────────────────────────
+  function syncImageOrder(images) {
+    const newIds = new Set(images.map(i => i.id));
+    state.imageOrder = state.imageOrder.filter(id => newIds.has(id));
+    images.forEach(img => {
+      if (!state.imageOrder.includes(img.id)) state.imageOrder.push(img.id);
+    });
   }
 
   function _updateSwatches(imageId, meta) {
@@ -824,15 +1071,24 @@
     Array.from(container.children).forEach(el => {
       if (!existingIds.has(el.dataset.imageId)) el.remove();
     });
-    state.images.forEach(img => {
+    // Render in imageOrder, re-appending each element to maintain DOM order
+    const orderedImages = state.imageOrder
+      .map(id => state.images.find(i => i.id === id))
+      .filter(Boolean);
+    orderedImages.forEach(img => {
       let el = document.getElementById(`item-${img.id}`);
       if (!el) {
         el = document.createElement('div');
-        el.className   = `upload-item ${img.status}`;
-        el.id          = `item-${img.id}`;
+        el.className       = `upload-item ${img.status}`;
+        el.id              = `item-${img.id}`;
         el.dataset.imageId = img.id;
-        el.innerHTML   = `
-          <div class="upload-item-name">${escHtml(img.filename)}</div>
+        el.draggable       = true;
+        el.innerHTML = `
+          <div class="upload-item-row1">
+            <span class="drag-handle" title="Drag to reorder">⠿</span>
+            <span class="upload-item-name" title="${escHtml(img.filename)}">${escHtml(img.filename)}</span>
+            <button class="delete-img-btn" title="Remove image">✕</button>
+          </div>
           <div class="upload-item-status">
             <div class="status-dot ${img.status}"></div>
             <span class="status-text ${img.status}">${img.status}</span>
@@ -840,11 +1096,62 @@
           </div>
           <div class="progress-bar-wrap"><div class="progress-bar-fill"></div></div>
         `;
-        container.appendChild(el);
+        el.querySelector('.delete-img-btn').onclick = (e) => {
+          e.stopPropagation();
+          deleteImage(img.id);
+        };
+        el.addEventListener('dragstart', (e) => {
+          state._draggingId = img.id;
+          e.dataTransfer.effectAllowed = 'move';
+          setTimeout(() => el.classList.add('dragging'), 0);
+        });
+        el.addEventListener('dragend', () => {
+          el.classList.remove('dragging');
+          state._draggingId = null;
+          document.querySelectorAll('.upload-item').forEach(e => e.classList.remove('drag-over'));
+        });
+        el.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (state._draggingId && state._draggingId !== img.id) {
+            document.querySelectorAll('.upload-item').forEach(e => e.classList.remove('drag-over'));
+            el.classList.add('drag-over');
+          }
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+        el.addEventListener('drop', (e) => {
+          e.preventDefault();
+          el.classList.remove('drag-over');
+          if (!state._draggingId || state._draggingId === img.id) return;
+          const fromIdx = state.imageOrder.indexOf(state._draggingId);
+          const toIdx   = state.imageOrder.indexOf(img.id);
+          if (fromIdx >= 0 && toIdx >= 0) {
+            state.imageOrder.splice(fromIdx, 1);
+            state.imageOrder.splice(toIdx, 0, state._draggingId);
+          }
+          renderImageList();
+        });
       }
+      container.appendChild(el);  // re-append to maintain order
       if (img.status === 'ready' && img.meta) _updateSwatches(img.id, img.meta);
+      _updatePriorityBadge(img.id);
     });
     clearBtn.style.display = state.images.length ? 'block' : 'none';
+  }
+
+  // ── Individual image delete ───────────────────────────────────────────────────
+  async function deleteImage(id) {
+    try {
+      await fetch(`/images/${id}`, { method: 'DELETE' });
+    } catch {
+      setStatus('delete failed', 'err');
+    }
+  }
+
+  // ── Priority toggle ───────────────────────────────────────────────────────────
+  function toggleWeights(checked) {
+    state.useImageWeights = checked;
+    renderImageList();
   }
 
   function escHtml(s) {
@@ -873,7 +1180,8 @@
 
   async function clearImages() {
     await fetch('/images', { method: 'DELETE' });
-    state.images = [];
+    state.images     = [];
+    state.imageOrder = [];
     renderImageList();
     setStatus('cleared', 'ok');
   }
@@ -889,7 +1197,7 @@
   function requestComposition() {
     state.compositionRole = 'current';
     setStatus('generating…', 'loading');
-    sendWS({ type: 'request_composition', sliders: state.sliders });
+    sendWS({ type: 'request_composition', sliders: state.sliders, ..._getCompositionExtras() });
   }
 
   // ── WS send ───────────────────────────────────────────────────────────────────
@@ -905,37 +1213,41 @@
   }
 
   // ── Cut test panel ────────────────────────────────────────────────────────────
-  const CUT_LABELS = {
-    silhouette:             'Silhouette',
-    tear:                   'Loose Tear',
-    geometric_rect:         'Geometric — Rect',
-    geometric_strip:        'Geometric — Strip',
-    geometric_triangle:     'Geometric — Triangle',
-    geometric_wedge:        'Geometric — Wedge',
-    raw:                    'Raw Crop',
-    morph_compress_x:       'Morph — Compress X',
-    morph_stretch_x:        'Morph — Stretch X',
-    morph_rotate:           'Morph — Rotate',
-    morph_diagonal_stretch: 'Morph — Diagonal Stretch',
-    morph_shear:            'Morph — Shear',
-    morph_combined:         'Morph — Combined',
-  };
-  const CUT_SECTION_KEYS   = ['silhouette','tear','geometric_rect','geometric_strip','geometric_triangle','geometric_wedge','raw'];
-  const MORPH_SECTION_KEYS = ['morph_compress_x','morph_stretch_x','morph_rotate','morph_diagonal_stretch','morph_shear','morph_combined'];
 
   function _buildSection(title, keys, data, grid) {
+    const validKeys = keys.filter(k => k in data);
+    if (!validKeys.length) return;
+    const imageId    = state._cutTestImageId;
+    const disabledSet = state.cutPrefs[imageId] || new Set();
+
     const header = document.createElement('div');
     header.style.cssText = 'width:100%;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:0.1em;padding:8px 0 4px;border-top:1px solid #222;margin-top:4px';
     header.textContent = title;
     grid.appendChild(header);
-    keys.forEach(key => {
-      if (!(key in data)) return;
-      const src  = data[key];
-      const item = document.createElement('div');
-      item.className = 'cut-test-item';
+
+    validKeys.forEach(key => {
+      const src        = data[key];
+      const isDisabled = disabledSet.has(key);
+      const item       = document.createElement('div');
+      item.className   = 'cut-test-item' + (isDisabled ? ' cut-tile-disabled' : '');
+
       item.innerHTML = src
         ? `<img src="${src}" alt="${key}" /><div class="cut-test-label">${CUT_LABELS[key] || key}</div>`
         : `<div style="width:160px;height:120px;background:#1a1a1a;border:1px solid #2a2a2a;display:flex;align-items:center;justify-content:center;color:#444;font-size:10px">failed</div><div class="cut-test-label">${CUT_LABELS[key] || key}</div>`;
+
+      const cb       = document.createElement('input');
+      cb.type        = 'checkbox';
+      cb.className   = 'cut-tile-toggle';
+      cb.checked     = !isDisabled;
+      cb.title       = 'Include in compositions';
+      cb.addEventListener('change', () => {
+        if (!state.cutPrefs[imageId]) state.cutPrefs[imageId] = new Set();
+        if (cb.checked) state.cutPrefs[imageId].delete(key);
+        else            state.cutPrefs[imageId].add(key);
+        _saveCutPrefs();
+        item.classList.toggle('cut-tile-disabled', !cb.checked);
+      });
+      item.appendChild(cb);
       grid.appendChild(item);
     });
   }
@@ -945,10 +1257,12 @@
     const backdrop = document.getElementById('cut-test-backdrop');
     const loading  = document.getElementById('cut-test-loading');
     const grid     = document.getElementById('cut-test-grid');
-    grid.innerHTML          = '';
-    loading.style.display   = 'block';
-    panel.style.display     = 'block';
-    backdrop.style.display  = 'block';
+    state._cutTestImageId = imageId;
+    grid.innerHTML         = '';
+    loading.style.display  = 'block';
+    panel.style.display    = 'block';
+    backdrop.style.display = 'block';
+    document.getElementById('cut-test-filter').innerHTML = '';
     try {
       const res  = await fetch(`/test-cuts/${imageId}`);
       const data = await res.json();

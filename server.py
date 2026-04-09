@@ -106,6 +106,21 @@ async def clear_images():
     return JSONResponse({"cleared": True})
 
 
+@app.delete("/images/{image_id}")
+async def delete_image(image_id: str):
+    global uploaded_images
+    entry = next((img for img in uploaded_images if img["id"] == image_id), None)
+    if not entry:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        Path(entry["path"]).unlink(missing_ok=True)
+    except Exception:
+        pass
+    uploaded_images = [img for img in uploaded_images if img["id"] != image_id]
+    await broadcast({"type": "images_updated", "images": _serialized_images()})
+    return JSONResponse({"deleted": image_id})
+
+
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
@@ -130,6 +145,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     data.get("seed"),
                     data.get("context_crop"),
                     data.get("tonal_hint"),
+                    data.get("image_order"),
+                    data.get("use_weights", True),
+                    data.get("image_cut_prefs"),
                 )
                 await websocket.send_json(response)
 
@@ -288,7 +306,9 @@ def _generate_test_cuts(entry: dict) -> dict:
 # ── Phase 4 / 5: real composition ─────────────────────────────────────────────
 
 def _run_composition(sliders: dict, seed=None,
-                     context_crop_b64=None, tonal_hint=None) -> dict:
+                     context_crop_b64=None, tonal_hint=None,
+                     image_order=None, use_weights=True,
+                     image_cut_prefs=None) -> dict:
     """Synchronous: runs in asyncio.to_thread. Returns WS message dict."""
     from engine.compositor import compose
 
@@ -303,7 +323,20 @@ def _run_composition(sliders: dict, seed=None,
         encoded = base64.b64encode(buf.getvalue()).decode()
         return {"type": "composition", "image": f"data:image/jpeg;base64,{encoded}"}
 
-    pool = [{"path": img["path"], "meta": img["meta"]} for img in ready]
+    pool = [{"path": img["path"], "meta": img["meta"], "id": img["id"],
+             "disabled_cuts": list((image_cut_prefs or {}).get(img["id"], []))}
+            for img in ready]
+
+    # ── Image priority ordering + weights ──────────────────────────────────────
+    image_weights = None
+    if image_order and use_weights:
+        rank_map = {iid: idx for idx, iid in enumerate(image_order)}
+        n = len(pool)
+        pool.sort(key=lambda p: rank_map.get(p.get("id", ""), n))
+        if n == 1:
+            image_weights = [1.0]
+        else:
+            image_weights = [3.0 - (3.0 - 0.4) * (i / (n - 1)) for i in range(n)]
 
     # ── Context crop: add visible viewport as an extra pool image ──────────────
     tmp_path = None
@@ -346,7 +379,7 @@ def _run_composition(sliders: dict, seed=None,
 
     try:
         result_img = compose(pool, sliders, seed=seed, canvas_w=1200, canvas_h=900,
-                             tonal_hint=tonal_hint)
+                             tonal_hint=tonal_hint, image_weights=image_weights)
         buf = io.BytesIO()
         result_img.save(buf, format="JPEG", quality=88)
         encoded = base64.b64encode(buf.getvalue()).decode()
